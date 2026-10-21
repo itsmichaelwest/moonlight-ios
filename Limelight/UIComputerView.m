@@ -14,7 +14,7 @@
     UILabel* _hostLabel;
     UIImageView* _hostOverlay;
     UIActivityIndicatorView* _hostSpinner;
-    id<HostCallback> _callback;
+    __weak id<HostCallback> _callback;
     CGSize _labelSize;
 }
 static const float REFRESH_CYCLE = 2.0f;

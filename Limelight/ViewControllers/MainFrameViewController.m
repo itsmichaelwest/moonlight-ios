@@ -53,6 +53,11 @@
     NSArray* _sortedHostList;
 #if !TARGET_OS_TV
     UIComputerView* _addHostView;
+    __weak MainFrameViewController* _hostBrowser;
+    BOOL _initialHostSelection;
+    BOOL _initialHostUserInitiated;
+    BOOL _autoSelectHost;
+    BOOL _acceptHostUpdates;
 #endif
     NSArray* _sortedAppList;
     NSCache* _boxArtCache;
@@ -118,18 +123,6 @@ static NSMutableSet* hostList;
         [self->_discMan startDiscovery];
         [self alreadyPaired];
     });
-}
-
-- (void)disableUpButton {
-#if !TARGET_OS_TV
-    self.navigationItem.leftBarButtonItem = nil;
-#endif
-}
-
-- (void)enableUpButton {
-#if !TARGET_OS_TV
-    self.navigationItem.leftBarButtonItem = self.upButton;
-#endif
 }
 
 - (void)updateTitle {
@@ -304,11 +297,14 @@ static NSMutableSet* hostList;
     _sortedAppList = nil;
     
     [self updateTitle];
-    [self disableUpButton];
     
     [self.collectionView reloadData];
     [self.view setNeedsLayout];
-#if TARGET_OS_TV
+#if !TARGET_OS_TV
+    if (_hostBrowser != nil) {
+        [self.navigationController popToViewController:_hostBrowser animated:NO];
+    }
+#else
     [self.view addSubview:hostScrollView];
 #endif
 }
@@ -342,10 +338,24 @@ static NSMutableSet* hostList;
         return;
     }
     
+#if !TARGET_OS_TV
+    if (_hostBrowser == nil) {
+        MainFrameViewController* apps = [[MainFrameViewController alloc] init];
+        apps->_hostBrowser = self;
+        apps->_selectedHost = host;
+        apps->_showHiddenApps = _showHiddenApps;
+        _showHiddenApps = NO;
+        apps->_initialHostSelection = YES;
+        apps->_initialHostUserInitiated = view != nil;
+        [self.navigationController pushViewController:apps animated:view != nil];
+        return;
+    }
+    _initialHostSelection = NO;
+#endif
+
     Log(LOG_D, @"Clicked host: %@", host.name);
     _selectedHost = host;
     [self updateTitle];
-    [self enableUpButton];
     [self disableNavigation];
 #if !TARGET_OS_TV
     [self.collectionView reloadData];
@@ -447,7 +457,13 @@ static NSMutableSet* hostList;
 }
 
 - (UIViewController*) activeViewController {
-    UIViewController *topController = self.view.window.rootViewController;
+    UIWindow* window = self.view.window;
+#if !TARGET_OS_TV
+    if (window == nil) {
+        window = _hostBrowser.view.window;
+    }
+#endif
+    UIViewController *topController = window.rootViewController;
 
     while (topController.presentedViewController) {
         topController = topController.presentedViewController;
@@ -996,8 +1012,7 @@ static NSMutableSet* hostList;
     self.settingsButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"gearshape"] style:UIBarButtonItemStylePlain target:self action:@selector(showSettings)];
     self.settingsButton.accessibilityLabel = @"Settings";
     self.navigationItem.rightBarButtonItem = self.settingsButton;
-    self.upButton = [[UIBarButtonItem alloc] initWithTitle:@"Hosts" style:UIBarButtonItemStylePlain target:self action:@selector(showHostSelectionView)];
-    [self disableUpButton];
+    self.navigationItem.backButtonTitle = @"Hosts";
 #else
     // The settings button will direct the user into the Settings app on tvOS
     [_settingsButton setTarget:self];
@@ -1056,9 +1071,21 @@ static NSMutableSet* hostList;
     [self.collectionView addGestureRecognizer:cellLongPress];
 #endif
     
+#if !TARGET_OS_TV
+    if (_hostBrowser == nil) {
+        [self retrieveSavedHosts];
+    }
+#else
     [self retrieveSavedHosts];
+#endif
+#if TARGET_OS_TV
     _discMan = [[DiscoveryManager alloc] initWithHosts:[hostList allObjects] andCallback:self];
+#endif
         
+#if !TARGET_OS_TV
+    _autoSelectHost = _hostBrowser == nil && hostList.count == 1;
+    [self updateTitle];
+#else
     if ([hostList count] == 1) {
         [self hostClicked:[hostList anyObject] view:nil];
     }
@@ -1068,6 +1095,7 @@ static NSMutableSet* hostList;
         [self.view addSubview:hostScrollView];
 #endif
     }
+#endif
 }
 
 #if TARGET_OS_TV
@@ -1103,7 +1131,11 @@ static NSMutableSet* hostList;
         [_discMan startDiscovery];
         
         // This will refresh the applist when a paired host is selected
-        if (_selectedHost != nil && _selectedHost.pairState == PairStatePaired) {
+        if (_selectedHost != nil && _selectedHost.pairState == PairStatePaired
+#if !TARGET_OS_TV
+            && !_initialHostSelection
+#endif
+            ) {
             [self hostClicked:_selectedHost view:nil];
         }
     }
@@ -1160,7 +1192,9 @@ static NSMutableSet* hostList;
 {
     [super viewDidAppear:animated];
     
+#if TARGET_OS_TV
     [self.navigationController setNavigationBarHidden:NO animated:YES];
+#endif
 
 #if TARGET_OS_TV
     // Hide 1px border line
@@ -1181,11 +1215,29 @@ static NSMutableSet* hostList;
                                              selector: @selector(handleEnterBackground)
                                                  name: UISceneWillDeactivateNotification
                                                object: nil];
+#if !TARGET_OS_TV
+    if (_initialHostSelection) {
+        _initialHostSelection = NO;
+        [self hostClicked:_selectedHost view:_initialHostUserInitiated ? self.collectionView : nil];
+    }
+    else if (_autoSelectHost) {
+        _autoSelectHost = NO;
+        if (self.navigationController.topViewController == self) {
+            [self hostClicked:[hostList anyObject] view:nil];
+        }
+    }
+#endif
 }
 
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
+#if !TARGET_OS_TV
+    [self.navigationController setNavigationBarHidden:NO animated:animated];
+    _acceptHostUpdates = YES;
+    [_discMan stopDiscovery];
+    _discMan = [[DiscoveryManager alloc] initWithHosts:[hostList allObjects] andCallback:self];
+#endif
     
     // We can get here on home press while streaming
     // since the stream view segues to us just before
@@ -1201,9 +1253,25 @@ static NSMutableSet* hostList;
     [self beginForegroundRefresh];
 }
 
+#if !TARGET_OS_TV
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    _acceptHostUpdates = NO;
+    [_discMan stopDiscovery];
+}
+#endif
+
 - (void)viewDidDisappear:(BOOL)animated
 {
     [super viewDidDisappear:animated];
+#if !TARGET_OS_TV
+    if (_hostBrowser != nil && ![self.navigationController.viewControllers containsObject:self]) {
+        _selectedHost = nil;
+        [_appManager stopRetrieving];
+        _appManager = nil;
+        _discMan = nil;
+    }
+#endif
     
     // when discovery stops, we must create a new instance because
     // you cannot restart an NSOperation when it is finished
@@ -1246,6 +1314,11 @@ static NSMutableSet* hostList;
     // before our main thread dispatch happens.
     NSArray* hostsCopy = [NSArray arrayWithArray:hosts];
     dispatch_async(dispatch_get_main_queue(), ^{
+#if !TARGET_OS_TV
+        if (!self->_acceptHostUpdates) {
+            return;
+        }
+#endif
         Log(LOG_D, @"New host list:");
         for (TemporaryHost* host in hostsCopy) {
             Log(LOG_D, @"Host: \n{\n\t name:%@ \n\t address:%@ \n\t localAddress:%@ \n\t externalAddress:%@ \n\t ipv6Address:%@ \n\t uuid:%@ \n\t mac:%@ \n\t pairState:%d \n\t online:%d \n\t activeAddress:%@ \n}", host.name, host.address, host.localAddress, host.externalAddress, host.ipv6Address, host.uuid, host.mac, host.pairState, host.state, host.activeAddress);
@@ -1546,13 +1619,13 @@ static NSMutableSet* hostList;
 #endif
 
 - (void) disableNavigation {
-    self.navigationController.navigationBar.topItem.rightBarButtonItem.enabled = NO;
-    self.navigationController.navigationBar.topItem.leftBarButtonItem.enabled = NO;
+    self.navigationItem.rightBarButtonItem.enabled = NO;
+    self.navigationItem.leftBarButtonItem.enabled = NO;
 }
 
 - (void) enableNavigation {
-    self.navigationController.navigationBar.topItem.rightBarButtonItem.enabled = YES;
-    self.navigationController.navigationBar.topItem.leftBarButtonItem.enabled = YES;
+    self.navigationItem.rightBarButtonItem.enabled = YES;
+    self.navigationItem.leftBarButtonItem.enabled = YES;
 }
 
 #if TARGET_OS_TV

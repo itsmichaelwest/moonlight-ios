@@ -16,7 +16,7 @@
 
 @interface MDNSManager : NSObject <NSNetServiceBrowserDelegate, NSNetServiceDelegate>
 
-@property id<MDNSCallback> callback;
+@property (weak) id<MDNSCallback> callback;
 
 - (id) initWithCallback:(id<MDNSCallback>) callback;
 - (void) searchForHosts;

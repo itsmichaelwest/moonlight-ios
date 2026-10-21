@@ -343,7 +343,11 @@
     [_statsUpdateTimer invalidate];
     _statsUpdateTimer = nil;
     
+#if TARGET_OS_TV
     [self.navigationController popToRootViewControllerAnimated:YES];
+#else
+    [self.navigationController popViewControllerAnimated:YES];
+#endif
 }
 
 // This will fire if the user opens control center or gets a low battery message

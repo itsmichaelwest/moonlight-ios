@@ -17,8 +17,5 @@
 @interface MainFrameViewController : UICollectionViewController <DiscoveryCallback, PairCallback, HostCallback, AppCallback, AppAssetCallback, NSURLConnectionDelegate>
 
 @property (strong, nonatomic) IBOutlet UIBarButtonItem *settingsButton;
-#if !TARGET_OS_TV
-@property (strong, nonatomic) IBOutlet UIBarButtonItem *upButton;
-#endif
 
 @end

@@ -14,7 +14,7 @@
 
 @implementation AppAssetManager {
     NSOperationQueue* _opQueue;
-    id<AppAssetCallback> _callback;
+    __weak id<AppAssetCallback> _callback;
 }
 
 static const int MAX_REQUEST_COUNT = 4;

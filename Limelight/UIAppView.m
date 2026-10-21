@@ -17,7 +17,7 @@ static const float REFRESH_CYCLE = 1.0f;
     UIImageView* _appOverlay;
     UIImageView* _appImage;
     NSCache* _artCache;
-    id<AppCallback> _callback;
+    __weak id<AppCallback> _callback;
 }
 
 static UIImage* noImage;

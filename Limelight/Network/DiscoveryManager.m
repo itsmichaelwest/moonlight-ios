@@ -23,7 +23,7 @@
 @implementation DiscoveryManager {
     NSMutableArray* _hostQueue;
     NSMutableSet* _pausedHosts;
-    id<DiscoveryCallback> _callback;
+    __weak id<DiscoveryCallback> _callback;
     MDNSManager* _mdnsMan;
     NSOperationQueue* _opQueue;
     NSString* _uniqueId;
