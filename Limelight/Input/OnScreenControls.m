@@ -59,7 +59,7 @@
     BOOL l3Set;
     BOOL r3Set;
     
-    BOOL _iPad;
+    BOOL _largeLayout;
     CGRect _controlArea;
     UIView* _view;
     OnScreenControlsLevel _level;
@@ -120,20 +120,6 @@ static float L3_Y;
     _deadTouches = [[NSMutableArray alloc] init];
     _swapABXY = streamConfig.swapABXYButtons;
     
-    _iPad = ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPad);
-    _controlArea = CGRectMake(0, 0, _view.frame.size.width, _view.frame.size.height);
-    if (_iPad)
-    {
-        // Cut down the control area on an iPad so the controls are more reachable
-        _controlArea.size.height = _view.frame.size.height / 2.0;
-        _controlArea.origin.y = _view.frame.size.height - _controlArea.size.height;
-    }
-    else
-    {
-        _controlArea.origin.x = _controlArea.size.width * EDGE_WIDTH;
-        _controlArea.size.width -= _controlArea.origin.x * 2;
-    }
-    
     _aButton = [CALayer layer];
     _bButton = [CALayer layer];
     _xButton = [CALayer layer];
@@ -158,7 +144,41 @@ static float L3_Y;
     return self;
 }
 
+- (void) layoutControls {
+    CGRect controlArea = UIEdgeInsetsInsetRect(_view.bounds, _view.safeAreaInsets);
+    BOOL largeLayout = MIN(controlArea.size.width, controlArea.size.height) >= 600;
+    if (largeLayout) {
+        // Keep controls reachable near the lower edge of a large window.
+        controlArea.origin.y += controlArea.size.height / 2;
+        controlArea.size.height /= 2;
+    }
+    controlArea = CGRectInset(controlArea, controlArea.size.width * EDGE_WIDTH, 0);
+    if (CGRectEqualToRect(controlArea, _controlArea) && largeLayout == _largeLayout) {
+        return;
+    }
+
+    // Release held controls before moving their hit targets underneath active touches.
+    NSMutableSet* touches = [NSMutableSet setWithArray:_deadTouches];
+    UITouch* heldTouches[] = {_aTouch, _bTouch, _xTouch, _yTouch, _dpadTouch, _lsTouch, _rsTouch,
+                             _startTouch, _selectTouch, _r1Touch, _r2Touch, _r3Touch,
+                             _l1Touch, _l2Touch, _l3Touch};
+    for (int i = 0; i < sizeof(heldTouches) / sizeof(*heldTouches); i++) {
+        if (heldTouches[i] != nil) {
+            [touches addObject:heldTouches[i]];
+        }
+    }
+    [self handleTouchUpEvent:touches];
+    // Consume the rest of these touches rather than turning them into mouse input.
+    [_deadTouches addObjectsFromArray:touches.allObjects];
+    _controlArea = controlArea;
+    _largeLayout = largeLayout;
+    if (_visible) {
+        [self updateControls];
+    }
+}
+
 - (void) show {
+    [self layoutControls];
     _visible = YES;
         
     [self updateControls];
@@ -262,7 +282,7 @@ static float L3_Y;
     L3_Y = _controlArea.size.height * .85 + _controlArea.origin.y;
     R3_Y = _controlArea.size.height * .85 + _controlArea.origin.y;
     
-    if (_iPad) {
+    if (_largeLayout) {
         L3_X = _controlArea.size.width * .15 + _controlArea.origin.x;
         R3_X = _controlArea.size.width * .85 + _controlArea.origin.x;
     }
@@ -289,8 +309,8 @@ static float L3_Y;
     SELECT_X = _controlArea.size.width * .05 + _controlArea.origin.x;
     SELECT_Y = _controlArea.size.height * .95 + _controlArea.origin.y;
     
-    if (_iPad) {
-        // The analog sticks are kept closer to the sides on iPad
+    if (_largeLayout) {
+        // The analog sticks are kept closer to the sides in large windows
         LS_CENTER_X = _controlArea.size.width * .15 + _controlArea.origin.x;
         RS_CENTER_X = _controlArea.size.width * .85 + _controlArea.origin.x;
     }
@@ -310,8 +330,8 @@ static float L3_Y;
     R2_Y = _controlArea.size.height * .9 + _controlArea.origin.y;
     R2_X = _controlArea.size.width * .9 + _controlArea.origin.x;
     
-    if (_iPad) {
-        // Lower the D-pad and buttons on iPad
+    if (_largeLayout) {
+        // Lower the D-pad and buttons in large windows
         D_PAD_CENTER_Y = _controlArea.size.height * .75 + _controlArea.origin.y;
         BUTTON_CENTER_Y = _controlArea.size.height * .75 + _controlArea.origin.y;
         
@@ -332,9 +352,9 @@ static float L3_Y;
     BUTTON_CENTER_X = _controlArea.size.width * .9 + _controlArea.origin.x;
     BUTTON_CENTER_Y = _controlArea.size.height * .60 + _controlArea.origin.y;
     
-    if (_iPad)
+    if (_largeLayout)
     {
-        // The analog sticks are kept closer to the sides on iPad
+        // The analog sticks are kept closer to the sides in large windows
         LS_CENTER_X = _controlArea.size.width * .22 + _controlArea.origin.x;
         LS_CENTER_Y = _controlArea.size.height * .80 + _controlArea.origin.y;
         RS_CENTER_X = _controlArea.size.width * .77 + _controlArea.origin.x;
@@ -358,8 +378,8 @@ static float L3_Y;
     R1_Y = _controlArea.size.height * .27 + _controlArea.origin.y;
     R2_Y = _controlArea.size.height * .1 + _controlArea.origin.y;
     
-    if (_iPad) {
-        // Move L/R buttons closer to the side on iPad
+    if (_largeLayout) {
+        // Move L/R buttons closer to the side in large windows
         L1_X = _controlArea.size.width * .05 + _controlArea.origin.x;
         L2_X = _controlArea.size.width * .05 + _controlArea.origin.x;
         R1_X = _controlArea.size.width * .95 + _controlArea.origin.x;

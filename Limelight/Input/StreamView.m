@@ -46,6 +46,26 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
     NSDictionary<NSString *, NSNumber *> *dictCodes;
 }
 
+- (void)layoutSubviews {
+    [super layoutSubviews];
+
+    // Use the same aspect-fit rectangle as absolute mouse and touch input.
+    CGSize videoSize = [self getVideoAreaSize];
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    self.videoLayer.bounds = CGRectMake(0, 0, videoSize.width, videoSize.height);
+    self.videoLayer.position = CGPointMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds));
+#if !TARGET_OS_TV
+    [onScreenControls layoutControls];
+#endif
+    [CATransaction commit];
+}
+
+- (void)safeAreaInsetsDidChange {
+    [super safeAreaInsetsDidChange];
+    [self setNeedsLayout];
+}
+
 - (void) setupStreamView:(ControllerSupport*)controllerSupport
      interactionDelegate:(id<UserInteractionDelegate>)interactionDelegate
                   config:(StreamConfiguration*)streamConfig {
@@ -177,6 +197,9 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
 }
 
 - (CGSize) getVideoAreaSize {
+    if (streamAspectRatio <= 0) {
+        return CGSizeZero;
+    }
     if (self.bounds.size.width > self.bounds.size.height * streamAspectRatio) {
         return CGSizeMake(self.bounds.size.height * streamAspectRatio, self.bounds.size.height);
     } else {
@@ -615,6 +638,7 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
 }
 
 - (void)touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event {
+    [onScreenControls handleTouchUpEvent:touches];
     [touchHandler touchesCancelled:touches withEvent:event];
     [self handleMouseButtonEvent:BUTTON_ACTION_RELEASE
                       forTouches:touches

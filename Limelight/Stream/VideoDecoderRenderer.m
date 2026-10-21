@@ -71,6 +71,9 @@ extern int ff_isom_write_av1c(AVIOContext *pb, const uint8_t *buf, int size,
         [_view.layer addSublayer:displayLayer];
     }
     
+    _view.videoLayer = displayLayer;
+    [_view setNeedsLayout];
+
     if (formatDesc != nil) {
         CFRelease(formatDesc);
         formatDesc = nil;

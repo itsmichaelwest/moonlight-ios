@@ -78,6 +78,7 @@
 {
     [super viewDidLoad];
     
+    self.view.backgroundColor = [UIColor blackColor];
     [self.navigationController setNavigationBarHidden:YES animated:YES];
     
     [UIApplication sharedApplication].idleTimerDisabled = YES;
@@ -87,6 +88,7 @@
     _stageLabel = [[UILabel alloc] init];
     [_stageLabel setUserInteractionEnabled:NO];
     [_stageLabel setText:[NSString stringWithFormat:@"Starting %@...", self.streamConfig.appName]];
+    _stageLabel.numberOfLines = 0;
     [_stageLabel sizeToFit];
     _stageLabel.textAlignment = NSTextAlignmentCenter;
     _stageLabel.textColor = [UIColor whiteColor];
@@ -106,7 +108,7 @@
     _controllerSupport = [[ControllerSupport alloc] initWithConfig:self.streamConfig delegate:self];
     _inactivityTimer = nil;
     
-    _streamView = [[StreamView alloc] initWithFrame:self.view.frame];
+    _streamView = [[StreamView alloc] initWithFrame:self.view.bounds];
     [_streamView setupStreamView:_controllerSupport interactionDelegate:self config:self.streamConfig];
     
 #if TARGET_OS_TV
@@ -145,6 +147,7 @@
     [_tipLabel setText:@"Tip: Swipe from the left edge to disconnect from your PC"];
 #endif
     
+    _tipLabel.numberOfLines = 0;
     [_tipLabel sizeToFit];
     _tipLabel.textColor = [UIColor whiteColor];
     _tipLabel.textAlignment = NSTextAlignmentCenter;
@@ -187,14 +190,16 @@
     
     // Only enable scroll and zoom in absolute touch mode
     if (_settings.absoluteTouchMode) {
-        _scrollView = [[UIScrollView alloc] initWithFrame:self.view.frame];
+        _scrollView = [[UIScrollView alloc] initWithFrame:self.view.bounds];
 #if !TARGET_OS_TV
         [_scrollView.panGestureRecognizer setMinimumNumberOfTouches:2];
 #endif
         [_scrollView setShowsHorizontalScrollIndicator:NO];
         [_scrollView setShowsVerticalScrollIndicator:NO];
         [_scrollView setDelegate:self];
+        _scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
         [_scrollView setMaximumZoomScale:10.0f];
+        _scrollView.contentSize = _streamView.bounds.size;
         
         // Add StreamView inside a UIScrollView for absolute mode
         [_scrollView addSubview:_streamView];
@@ -208,6 +213,41 @@
     [self.view addSubview:_stageLabel];
     [self.view addSubview:_spinner];
     [self.view addSubview:_tipLabel];
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+
+    CGRect bounds = self.view.bounds;
+    if (_scrollView != nil) {
+        if (!CGSizeEqualToSize(_scrollView.bounds.size, bounds.size)) {
+            // Reset zoom only on a size change so touch and video geometry stay aligned.
+            _scrollView.zoomScale = 1;
+            _scrollView.frame = bounds;
+            _streamView.frame = CGRectMake(0, 0, bounds.size.width, bounds.size.height);
+            _scrollView.contentSize = bounds.size;
+            _scrollView.contentOffset = CGPointZero;
+        }
+    }
+    else {
+        _streamView.frame = bounds;
+    }
+
+    CGRect safeBounds = UIEdgeInsetsInsetRect(bounds, self.view.safeAreaInsets);
+    CGSize labelSize = [_stageLabel sizeThatFits:safeBounds.size];
+    _stageLabel.bounds = CGRectMake(0, 0, MIN(labelSize.width, safeBounds.size.width), labelSize.height);
+    _stageLabel.center = CGPointMake(CGRectGetMidX(safeBounds), CGRectGetMidY(safeBounds));
+    _spinner.center = CGPointMake(CGRectGetMidX(safeBounds), CGRectGetMidY(safeBounds) - _stageLabel.bounds.size.height - _spinner.bounds.size.height);
+    CGSize tipSize = [_tipLabel sizeThatFits:safeBounds.size];
+    _tipLabel.bounds = CGRectMake(0, 0, MIN(tipSize.width, safeBounds.size.width), tipSize.height);
+    _tipLabel.center = CGPointMake(CGRectGetMidX(safeBounds), CGRectGetMaxY(safeBounds) - tipSize.height);
+    [self layoutOverlay];
+}
+
+- (void)layoutOverlay {
+    CGRect safeBounds = UIEdgeInsetsInsetRect(self.view.bounds, self.view.safeAreaInsets);
+    CGSize size = [_overlayView sizeThatFits:CGSizeMake(safeBounds.size.width, CGFLOAT_MAX)];
+    _overlayView.frame = CGRectMake(CGRectGetMinX(safeBounds), CGRectGetMinY(safeBounds), safeBounds.size.width, size.height);
 }
 
 - (UIView *)viewForZoomingInScrollView:(UIScrollView *)scrollView {
@@ -287,16 +327,8 @@
     }
     
     if (text != nil) {
-        // We set our bounds to the maximum width in order to work around a bug where
-        // sizeToFit interacts badly with the UITextView's line breaks, causing the
-        // width to get smaller and smaller each time as more line breaks are inserted.
-        [_overlayView setBounds:CGRectMake(self.view.frame.origin.x,
-                                           _overlayView.frame.origin.y,
-                                           self.view.frame.size.width,
-                                           _overlayView.frame.size.height)];
         [_overlayView setText:text];
-        [_overlayView sizeToFit];
-        [_overlayView setCenter:CGPointMake(self.view.frame.size.width / 2, _overlayView.frame.size.height / 2)];
+        [self layoutOverlay];
         [_overlayView setHidden:NO];
     }
     else {
