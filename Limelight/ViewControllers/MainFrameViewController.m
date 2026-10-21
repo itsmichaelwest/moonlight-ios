@@ -1112,12 +1112,12 @@ static NSMutableSet* hostList;
     
     [[NSNotificationCenter defaultCenter] addObserver: self
                                              selector: @selector(handleReturnToForeground)
-                                                 name: UIApplicationDidBecomeActiveNotification
+                                                 name: UISceneDidActivateNotification
                                                object: nil];
     
     [[NSNotificationCenter defaultCenter] addObserver: self
                                              selector: @selector(handleEnterBackground)
-                                                 name: UIApplicationWillResignActiveNotification
+                                                 name: UISceneWillDeactivateNotification
                                                object: nil];
 }
 

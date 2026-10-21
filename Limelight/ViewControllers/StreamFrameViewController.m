@@ -159,17 +159,17 @@
     
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(applicationWillResignActive:)
-                                                 name:UIApplicationWillResignActiveNotification
+                                                 name:UISceneWillDeactivateNotification
                                                object:nil];
     
     [[NSNotificationCenter defaultCenter] addObserver: self
                                              selector: @selector(applicationDidBecomeActive:)
-                                                 name: UIApplicationDidBecomeActiveNotification
+                                                 name: UISceneDidActivateNotification
                                                object: nil];
     
     [[NSNotificationCenter defaultCenter] addObserver: self
                                              selector: @selector(applicationDidEnterBackground:)
-                                                 name: UIApplicationDidEnterBackgroundNotification
+                                                 name: UISceneDidEnterBackgroundNotification
                                                object: nil];
 
 #if 0
