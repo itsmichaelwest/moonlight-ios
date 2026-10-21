@@ -60,6 +60,7 @@
     BOOL r3Set;
     
     BOOL _largeLayout;
+    CGRect _separateControlArea;
     CGRect _controlArea;
     UIView* _view;
     OnScreenControlsLevel _level;
@@ -147,7 +148,23 @@ static float L3_Y;
 - (void) layoutControls {
     CGRect controlArea = UIEdgeInsetsInsetRect(_view.bounds, _view.safeAreaInsets);
     BOOL largeLayout = MIN(controlArea.size.width, controlArea.size.height) >= 600;
-    if (largeLayout) {
+    _separateControlArea = CGRectZero;
+    if ([(StreamView*)_view usesSeparateControlArea]) {
+        // Leave clearance around the hinge and keep the entire control artwork below it.
+        CGFloat top = MAX(CGRectGetMinY(controlArea), CGRectGetMidY(_view.bounds) + 16);
+        controlArea = CGRectMake(controlArea.origin.x, top, controlArea.size.width, MAX(0, CGRectGetMaxY(controlArea) - top));
+        _separateControlArea = controlArea;
+        CGFloat height = controlArea.size.height;
+        CGFloat padding = MAX(0, ([UIImage imageNamed:@"L2"].size.height / 2 - height * .1) / .8);
+        CGFloat stickReach = ([UIImage imageNamed:@"StickOuter"].size.height + [UIImage imageNamed:@"StickInner"].size.height) / 2;
+        padding = MAX(padding, (stickReach - height * .2) / .6);
+        CGFloat buttonReach = MAX([UIImage imageNamed:@"AButton"].size.height / 2 + BUTTON_DIST,
+                                 [UIImage imageNamed:@"DownButton"].size.height + D_PAD_DIST);
+        padding = MAX(padding, (buttonReach - height * .25) / .5);
+        padding = MAX(padding, ([UIImage imageNamed:@"StartButton"].size.height / 2 - height * .05) / .9);
+        controlArea = CGRectInset(controlArea, 0, MIN(padding, controlArea.size.height / 2));
+    }
+    else if (largeLayout) {
         // Keep controls reachable near the lower edge of a large window.
         controlArea.origin.y += controlArea.size.height / 2;
         controlArea.size.height /= 2;
@@ -186,6 +203,7 @@ static float L3_Y;
 
 - (void) setLevel:(OnScreenControlsLevel)level {
     _level = level;
+    [_view setNeedsLayout];
     
     // Only update controls if we're showing, otherwise
     // show will do it for us.
@@ -682,6 +700,9 @@ static float L3_Y;
     BOOL stickTouch = false;
     for (UITouch* touch in touches) {
         CGPoint touchLocation = [touch locationInView:_view];
+        if (!CGRectIsEmpty(_separateControlArea) && !CGRectContainsPoint(_separateControlArea, touchLocation)) {
+            continue;
+        }
         
         if (_aButton.superlayer != nil && [_aButton.presentationLayer hitTest:touchLocation]) {
             [_controllerSupport setButtonFlag:_controller flags:A_FLAG];
