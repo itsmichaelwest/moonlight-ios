@@ -892,10 +892,21 @@ static NSMutableSet* hostList;
 - (void)loadView {
     self.view = [[UIView alloc] init];
     AppCollectionView* collectionView = [[AppCollectionView alloc] initWithFrame:self.view.bounds collectionViewLayout:self.collectionViewLayout];
-    collectionView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    collectionView.translatesAutoresizingMaskIntoConstraints = NO;
+    collectionView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAlways;
     self.collectionView = collectionView;
+    [NSLayoutConstraint activateConstraints:@[
+        [collectionView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [collectionView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+        [collectionView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [collectionView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor]
+    ]];
     collectionView.dataSource = self;
     collectionView.delegate = self;
+}
+
+- (void)scrollViewDidChangeAdjustedContentInset:(UIScrollView*)scrollView {
+    [self.view setNeedsLayout];
 }
 
 - (void)showSettings {
@@ -944,7 +955,8 @@ static NSMutableSet* hostList;
     [super viewDidLayoutSubviews];
 #if !TARGET_OS_TV
     UICollectionViewFlowLayout* layout = (UICollectionViewFlowLayout*)self.collectionViewLayout;
-    CGFloat width = self.collectionView.bounds.size.width - self.collectionView.adjustedContentInset.left - self.collectionView.adjustedContentInset.right - layout.sectionInset.left - layout.sectionInset.right;
+    UIEdgeInsets contentInsets = self.collectionView.adjustedContentInset;
+    CGFloat width = self.collectionView.bounds.size.width - contentInsets.left - contentInsets.right - layout.sectionInset.left - layout.sectionInset.right;
     CGFloat minimumWidth = _selectedHost == nil ? 220 : 120;
     NSInteger columns = MAX(1, (NSInteger)floor((width + layout.minimumInteritemSpacing) / (minimumWidth + layout.minimumInteritemSpacing)));
     CGFloat itemWidth = MAX(1, floor((width - (columns - 1) * layout.minimumInteritemSpacing) / columns));
@@ -971,6 +983,8 @@ static NSMutableSet* hostList;
     appearance.shadowColor = UIColor.clearColor;
     self.navigationController.navigationBar.standardAppearance = appearance;
     self.navigationController.navigationBar.scrollEdgeAppearance = appearance;
+    self.navigationController.navigationBar.compactAppearance = appearance;
+    self.navigationController.navigationBar.compactScrollEdgeAppearance = appearance;
     self.navigationController.navigationBar.tintColor = UIColor.whiteColor;
     [self.collectionView registerClass:UICollectionViewCell.class forCellWithReuseIdentifier:@"AppCell"];
     [self.collectionView registerClass:UICollectionViewCell.class forCellWithReuseIdentifier:@"HostCell"];
