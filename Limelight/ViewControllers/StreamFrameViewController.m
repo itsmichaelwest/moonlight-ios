@@ -587,7 +587,7 @@
 - (void) updatePreferredDisplayMode:(BOOL)streamActive {
 #if TARGET_OS_TV
     if (@available(tvOS 11.2, *)) {
-        UIWindow* window = [[[UIApplication sharedApplication] delegate] window];
+        UIWindow* window = self.view.window;
         AVDisplayManager* displayManager = [window avDisplayManager];
         
         // This logic comes from Kodi and MrMC
