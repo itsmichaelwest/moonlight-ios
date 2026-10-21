@@ -19,8 +19,6 @@
     NSInteger _lastSelectedResolutionIndex;
 }
 
-@dynamic overrideUserInterfaceStyle;
-
 static NSString* bitrateFormat = @"Bitrate: %.1f Mbps";
 static const int bitrateTable[] = {
     500,
@@ -79,7 +77,7 @@ CGSize resolutionTable[RESOLUTION_TABLE_SIZE];
 - (void)loadView {
     self.scrollView = [[UIScrollView alloc] init];
     self.view = self.scrollView;
-    self.view.backgroundColor = [UIColor colorWithRed:31.0 / 255.0 green:33.0 / 255.0 blue:36.0 / 255.0 alpha:1];
+    self.view.backgroundColor = UIColor.systemBackgroundColor;
     UIStackView* stack = [[UIStackView alloc] init];
     stack.axis = UILayoutConstraintAxisVertical;
     stack.spacing = 8;
@@ -95,7 +93,6 @@ CGSize resolutionTable[RESOLUTION_TABLE_SIZE];
     [self addLabel:@"Resolution" toStack:stack];
     self.resolutionSelector = [self addSegments:@[@"360p", @"720p", @"1080p", @"4K", @"Safe Area", @"Full", @"Custom"] toStack:stack];
     self.resolutionDisplayView = [[UIView alloc] init];
-    self.resolutionDisplayView.backgroundColor = UIColor.systemBackgroundColor;
     [self.resolutionDisplayView.heightAnchor constraintEqualToConstant:35].active = YES;
     [stack addArrangedSubview:self.resolutionDisplayView];
     [stack setCustomSpacing:16 afterView:self.resolutionDisplayView];
@@ -103,7 +100,6 @@ CGSize resolutionTable[RESOLUTION_TABLE_SIZE];
     self.framerateSelector = [self addSegments:@[@"30 FPS", @"60 FPS", @"120 FPS"] toStack:stack];
     self.bitrateLabel = [self addLabel:@"Bitrate: 10 Mbps" toStack:stack];
     self.bitrateSlider = [[UISlider alloc] init];
-    self.bitrateSlider.tintColor = self.resolutionSelector.selectedSegmentTintColor;
     [stack addArrangedSubview:self.bitrateSlider];
     [stack setCustomSpacing:16 afterView:self.bitrateSlider];
     [self addLabel:@"Touch Mode" toStack:stack];
@@ -133,8 +129,8 @@ CGSize resolutionTable[RESOLUTION_TABLE_SIZE];
 - (UILabel*)addLabel:(NSString*)text toStack:(UIStackView*)stack {
     UILabel* label = [[UILabel alloc] init];
     label.text = text;
-    label.font = [UIFont boldSystemFontOfSize:17];
-    label.textColor = [UIColor colorWithRed:0.9390243902 green:0.9625305918 blue:1 alpha:1];
+    label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
+    label.adjustsFontForContentSizeCategory = YES;
     label.numberOfLines = 0;
     [stack addArrangedSubview:label];
     return label;
@@ -143,7 +139,6 @@ CGSize resolutionTable[RESOLUTION_TABLE_SIZE];
 - (UISegmentedControl*)addSegments:(NSArray<NSString*>*)titles toStack:(UIStackView*)stack {
     UISegmentedControl* control = [[UISegmentedControl alloc] initWithItems:titles];
     control.apportionsSegmentWidthsByContent = YES;
-    control.selectedSegmentTintColor = [UIColor colorWithRed:0.6716768742 green:0.6171170473 blue:0.9990298748 alpha:1];
     [control setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
     [stack addArrangedSubview:control];
     [stack setCustomSpacing:16 afterView:control];
@@ -184,11 +179,6 @@ BOOL isCustomResolution(CGSize res) {
     self.title = @"Settings";
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(done)];
 
-    // Always run settings in dark mode because we want the light fonts
-    if (@available(iOS 13.0, tvOS 13.0, *)) {
-        self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
-    }
-
     DataManager* dataMan = [[DataManager alloc] init];
     TemporarySettings* currentSettings = [dataMan getSettings];
 
@@ -204,7 +194,6 @@ BOOL isCustomResolution(CGSize res) {
     CGFloat fullScreenWidth = MAX(window.bounds.size.width, window.bounds.size.height) * screenScale;
     CGFloat fullScreenHeight = MIN(window.bounds.size.width, window.bounds.size.height) * screenScale;
 
-    self.resolutionDisplayView.layer.cornerRadius = 10;
     self.resolutionDisplayView.clipsToBounds = YES;
     UITapGestureRecognizer *resolutionDisplayViewTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(resolutionDisplayViewTapped:)];
     [self.resolutionDisplayView addGestureRecognizer:resolutionDisplayViewTap];
