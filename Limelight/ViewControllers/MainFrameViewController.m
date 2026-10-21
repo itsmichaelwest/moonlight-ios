@@ -992,16 +992,6 @@ static NSMutableSet* hostList;
 #if !TARGET_OS_TV
     self.collectionView.backgroundColor = [UIColor colorWithWhite:1.0 / 3.0 alpha:1];
     self.view.backgroundColor = self.collectionView.backgroundColor;
-    UINavigationBarAppearance* appearance = [[UINavigationBarAppearance alloc] init];
-    [appearance configureWithOpaqueBackground];
-    appearance.backgroundColor = [UIColor colorWithWhite:2.0 / 3.0 alpha:1];
-    appearance.titleTextAttributes = @{NSForegroundColorAttributeName:UIColor.whiteColor};
-    appearance.shadowColor = UIColor.clearColor;
-    self.navigationController.navigationBar.standardAppearance = appearance;
-    self.navigationController.navigationBar.scrollEdgeAppearance = appearance;
-    self.navigationController.navigationBar.compactAppearance = appearance;
-    self.navigationController.navigationBar.compactScrollEdgeAppearance = appearance;
-    self.navigationController.navigationBar.tintColor = UIColor.whiteColor;
     [self.collectionView registerClass:UICollectionViewCell.class forCellWithReuseIdentifier:@"AppCell"];
     [self.collectionView registerClass:UICollectionViewCell.class forCellWithReuseIdentifier:@"HostCell"];
     [self.collectionView registerClass:UICollectionViewCell.class forCellWithReuseIdentifier:@"AddHostCell"];
