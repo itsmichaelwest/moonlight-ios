@@ -17,4 +17,5 @@
 - (BOOL)isShown;
 
 @property (weak, nonatomic) IBOutlet UIActivityIndicatorView *loadingSpinner;
+@property (weak, nonatomic) UIViewController* presentingController;
 @end

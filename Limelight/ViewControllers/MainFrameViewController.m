@@ -23,6 +23,7 @@
 #import "StreamFrameViewController.h"
 #import "LoadingFrameViewController.h"
 #import "ComputerScrollView.h"
+#import "AppCollectionView.h"
 #import "TemporaryApp.h"
 #import "IdManager.h"
 #import "ConnectionHelper.h"
@@ -49,7 +50,10 @@
     UIAlertController* _pairAlert;
     LoadingFrameViewController* _loadingFrame;
     UIScrollView* hostScrollView;
-    FrontViewPosition currentPosition;
+    NSArray* _sortedHostList;
+#if !TARGET_OS_TV
+    UIComputerView* _addHostView;
+#endif
     NSArray* _sortedAppList;
     NSCache* _boxArtCache;
     bool _background;
@@ -118,13 +122,13 @@ static NSMutableSet* hostList;
 
 - (void)disableUpButton {
 #if !TARGET_OS_TV
-    [self->_upButton setTitle:nil];
+    self.navigationItem.leftBarButtonItem = nil;
 #endif
 }
 
 - (void)enableUpButton {
 #if !TARGET_OS_TV
-    [self->_upButton setTitle:@"Select New Host"];
+    self.navigationItem.leftBarButtonItem = self.upButton;
 #endif
 }
 
@@ -303,7 +307,10 @@ static NSMutableSet* hostList;
     [self disableUpButton];
     
     [self.collectionView reloadData];
+    [self.view setNeedsLayout];
+#if TARGET_OS_TV
     [self.view addSubview:hostScrollView];
+#endif
 }
 
 - (void) receivedAssetForApp:(TemporaryApp*)app {
@@ -340,6 +347,10 @@ static NSMutableSet* hostList;
     [self updateTitle];
     [self enableUpButton];
     [self disableNavigation];
+#if !TARGET_OS_TV
+    [self.collectionView reloadData];
+    [self.view setNeedsLayout];
+#endif
     
 #if TARGET_OS_TV
     // Intercept the menu key to go back to the host page
@@ -436,7 +447,7 @@ static NSMutableSet* hostList;
 }
 
 - (UIViewController*) activeViewController {
-    UIViewController *topController = [UIApplication sharedApplication].keyWindow.rootViewController;
+    UIViewController *topController = self.view.window.rootViewController;
 
     while (topController.presentedViewController) {
         topController = topController.presentedViewController;
@@ -707,14 +718,6 @@ static NSMutableSet* hostList;
     
     [_appManager stopRetrieving];
     
-#if !TARGET_OS_TV
-    if (currentPosition != FrontViewPositionLeft) {
-        // This must not be animated because we need the position
-        // to change (and notify our callback to save settings data)
-        // before we call prepareToStreamApp.
-        [[self revealViewController] revealToggleAnimated:NO];
-    }
-#endif
 
     TemporaryApp* currentApp = [self findRunningApp:app.host];
     
@@ -748,7 +751,7 @@ static NSMutableSet* hostList;
             [self prepareToStreamApp:app];
         }
 
-        [self performSegueWithIdentifier:@"createStreamFrame" sender:nil];
+        [self showStream];
     }]];
     
     if (currentApp != nil) {
@@ -802,7 +805,7 @@ static NSMutableSet* hostList;
                                                         if (![app.id isEqualToString:currentApp.id]) {
                                                             [self prepareToStreamApp:app];
                                                             [self hideLoadingFrame: ^{
-                                                                [self performSegueWithIdentifier:@"createStreamFrame" sender:nil];
+                                                                [self showStream];
                                                             }];
                                                         }
                                                         else {
@@ -843,21 +846,13 @@ static NSMutableSet* hostList;
     
     [_appManager stopRetrieving];
     
-#if !TARGET_OS_TV
-    if (currentPosition != FrontViewPositionLeft) {
-        // This must not be animated because we need the position
-        // to change (and notify our callback to save settings data)
-        // before we call prepareToStreamApp.
-        [[self revealViewController] revealToggleAnimated:NO];
-    }
-#endif
     
     if ([self findRunningApp:app.host]) {
         // If there's a running app, display a menu
         [self appLongClicked:app view:view];
     } else {
         [self prepareToStreamApp:app];
-        [self performSegueWithIdentifier:@"createStreamFrame" sender:nil];
+        [self showStream];
     }
 }
 
@@ -870,22 +865,64 @@ static NSMutableSet* hostList;
     return nil;
 }
 
-#if !TARGET_OS_TV
-- (void)revealController:(SWRevealViewController *)revealController didMoveToPosition:(FrontViewPosition)position {
-    // If we moved back to the center position, we should save the settings
-    if (position == FrontViewPositionLeft) {
-        [(SettingsViewController*)[revealController rearViewController] saveSettings];
+- (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath {
+#if TARGET_OS_TV
+    [self appClicked:_sortedAppList[indexPath.row] view:nil];
+#else
+    if (_selectedHost == nil) {
+        if (indexPath.item == _sortedHostList.count) {
+            [self addHostClicked];
+        }
+        else {
+            [self hostClicked:_sortedHostList[indexPath.item] view:[collectionView cellForItemAtIndexPath:indexPath]];
+        }
     }
-    
-    currentPosition = position;
+#endif
+}
+
+#if !TARGET_OS_TV
+- (instancetype)init {
+    UICollectionViewFlowLayout* layout = [[UICollectionViewFlowLayout alloc] init];
+    layout.minimumLineSpacing = 16;
+    layout.minimumInteritemSpacing = 16;
+    layout.sectionInset = UIEdgeInsetsMake(20, 20, 20, 20);
+    return [super initWithCollectionViewLayout:layout];
+}
+
+- (void)loadView {
+    self.view = [[UIView alloc] init];
+    AppCollectionView* collectionView = [[AppCollectionView alloc] initWithFrame:self.view.bounds collectionViewLayout:self.collectionViewLayout];
+    collectionView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.collectionView = collectionView;
+    collectionView.dataSource = self;
+    collectionView.delegate = self;
+}
+
+- (void)showSettings {
+    SettingsViewController* settings = [[SettingsViewController alloc] initWithWindow:self.view.window];
+    UINavigationController* navigation = [[UINavigationController alloc] initWithRootViewController:settings];
+    navigation.modalPresentationStyle = UIModalPresentationPageSheet;
+    navigation.sheetPresentationController.detents = @[UISheetPresentationControllerDetent.largeDetent];
+    [self presentViewController:navigation animated:YES completion:nil];
+}
+
+- (UIContextMenuConfiguration*)collectionView:(UICollectionView*)collectionView contextMenuConfigurationForItemAtIndexPath:(NSIndexPath*)indexPath point:(CGPoint)point {
+    if (_selectedHost == nil && indexPath.item < _sortedHostList.count) {
+        [self hostLongClicked:_sortedHostList[indexPath.item] view:[collectionView cellForItemAtIndexPath:indexPath]];
+    }
+    return nil;
 }
 #endif
 
+- (void)showStream {
 #if TARGET_OS_TV
-- (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath {
-    [self appClicked:_sortedAppList[indexPath.row] view:nil];
-}
+    [self performSegueWithIdentifier:@"createStreamFrame" sender:nil];
+#else
+    StreamFrameViewController* streamFrame = [[StreamFrameViewController alloc] init];
+    streamFrame.streamConfig = _streamConfig;
+    [self.navigationController pushViewController:streamFrame animated:YES];
 #endif
+}
 
 - (void)prepareForSegue:(UIStoryboardSegue *)segue sender:(id)sender {
     if ([segue.destinationViewController isKindOfClass:[StreamFrameViewController class]]) {
@@ -903,20 +940,21 @@ static NSMutableSet* hostList;
     [_loadingFrame dismissLoadingFrame:completion];
 }
 
-- (void)adjustScrollViewForSafeArea:(UIScrollView*)view {
-    if (@available(iOS 11.0, *)) {
-        if (self.view.safeAreaInsets.left >= 20 || self.view.safeAreaInsets.right >= 20) {
-            view.contentInset = UIEdgeInsetsMake(0, 20, 0, 20);
-        }
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+#if !TARGET_OS_TV
+    UICollectionViewFlowLayout* layout = (UICollectionViewFlowLayout*)self.collectionViewLayout;
+    CGFloat width = self.collectionView.bounds.size.width - self.collectionView.adjustedContentInset.left - self.collectionView.adjustedContentInset.right - layout.sectionInset.left - layout.sectionInset.right;
+    CGFloat minimumWidth = _selectedHost == nil ? 220 : 120;
+    NSInteger columns = MAX(1, (NSInteger)floor((width + layout.minimumInteritemSpacing) / (minimumWidth + layout.minimumInteritemSpacing)));
+    CGFloat itemWidth = MAX(1, floor((width - (columns - 1) * layout.minimumInteritemSpacing) / columns));
+    CGFloat hostHeight = _addHostView.bounds.size.height + 20;
+    CGSize itemSize = CGSizeMake(itemWidth, _selectedHost == nil ? hostHeight : itemWidth * 4 / 3);
+    if (!CGSizeEqualToSize(layout.itemSize, itemSize)) {
+        layout.itemSize = itemSize;
+        [layout invalidateLayout];
     }
-}
-
-// Adjust the subviews for the safe area on the iPhone X.
-- (void)viewSafeAreaInsetsDidChange {
-    [super viewSafeAreaInsetsDidChange];
-    
-    [self adjustScrollViewForSafeArea:self.collectionView];
-    [self adjustScrollViewForSafeArea:self->hostScrollView];
+#endif
 }
 
 - (void)viewDidLoad
@@ -924,24 +962,28 @@ static NSMutableSet* hostList;
     [super viewDidLoad];
         
 #if !TARGET_OS_TV
-    // Set the side bar button action. When it's tapped, it'll show the sidebar.
-    [_settingsButton setTarget:self.revealViewController];
-    [_settingsButton setAction:@selector(revealToggle:)];
-    
-    // Set the host name button action. When it's tapped, it'll show the host selection view.
-    [_upButton setTarget:self];
-    [_upButton setAction:@selector(showHostSelectionView)];
+    self.collectionView.backgroundColor = [UIColor colorWithWhite:1.0 / 3.0 alpha:1];
+    self.view.backgroundColor = self.collectionView.backgroundColor;
+    UINavigationBarAppearance* appearance = [[UINavigationBarAppearance alloc] init];
+    [appearance configureWithOpaqueBackground];
+    appearance.backgroundColor = [UIColor colorWithWhite:2.0 / 3.0 alpha:1];
+    appearance.titleTextAttributes = @{NSForegroundColorAttributeName:UIColor.whiteColor};
+    appearance.shadowColor = UIColor.clearColor;
+    self.navigationController.navigationBar.standardAppearance = appearance;
+    self.navigationController.navigationBar.scrollEdgeAppearance = appearance;
+    self.navigationController.navigationBar.tintColor = UIColor.whiteColor;
+    [self.collectionView registerClass:UICollectionViewCell.class forCellWithReuseIdentifier:@"AppCell"];
+    [self.collectionView registerClass:UICollectionViewCell.class forCellWithReuseIdentifier:@"HostCell"];
+    [self.collectionView registerClass:UICollectionViewCell.class forCellWithReuseIdentifier:@"AddHostCell"];
+    _addHostView = [[UIComputerView alloc] initForAddWithCallback:self];
+    _addHostView.translatesAutoresizingMaskIntoConstraints = NO;
+    [_addHostView.widthAnchor constraintEqualToConstant:_addHostView.bounds.size.width].active = YES;
+    [_addHostView.heightAnchor constraintEqualToConstant:_addHostView.bounds.size.height].active = YES;
+    self.settingsButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"gearshape"] style:UIBarButtonItemStylePlain target:self action:@selector(showSettings)];
+    self.settingsButton.accessibilityLabel = @"Settings";
+    self.navigationItem.rightBarButtonItem = self.settingsButton;
+    self.upButton = [[UIBarButtonItem alloc] initWithTitle:@"Hosts" style:UIBarButtonItemStylePlain target:self action:@selector(showHostSelectionView)];
     [self disableUpButton];
-    
-    // Set the gesture
-    [self.view addGestureRecognizer:self.revealViewController.panGestureRecognizer];
-    
-    // Get callbacks associated with the viewController
-    [self.revealViewController setDelegate:self];
-    
-    // Disable bounce-back on reveal VC otherwise the settings will snap closed
-    // if the user drags all the way off the screen opposite the settings pane.
-    self.revealViewController.bounceBackOnOverdraw = NO;
 #else
     // The settings button will direct the user into the Settings app on tvOS
     [_settingsButton setTarget:self];
@@ -958,10 +1000,13 @@ static NSMutableSet* hostList;
     self.navigationController.navigationBar.titleTextAttributes = [NSDictionary dictionaryWithObject:[UIColor whiteColor] forKey:NSForegroundColorAttributeName];
 #endif
     
+#if TARGET_OS_TV
     _loadingFrame = [self.storyboard instantiateViewControllerWithIdentifier:@"loadingFrame"];
-    
-    // Set the current position to the center
-    currentPosition = FrontViewPositionLeft;
+#else
+    _loadingFrame = [[LoadingFrameViewController alloc] init];
+    _loadingFrame.modalPresentationStyle = UIModalPresentationOverFullScreen;
+#endif
+    _loadingFrame.presentingController = self;
     
     // Set up crypto
     [CryptoManager generateKeyPairUsingSSL];
@@ -978,11 +1023,14 @@ static NSMutableSet* hostList;
     
     _boxArtCache = [[NSCache alloc] init];
         
+#if TARGET_OS_TV
     hostScrollView = [[ComputerScrollView alloc] init];
     hostScrollView.frame = CGRectMake(0, self.navigationController.navigationBar.frame.origin.y + self.navigationController.navigationBar.frame.size.height, self.view.frame.size.width, self.view.frame.size.height / 2);
     [hostScrollView setShowsHorizontalScrollIndicator:NO];
     hostScrollView.delaysContentTouches = NO;
     
+#endif
+
     self.collectionView.delaysContentTouches = NO;
     self.collectionView.allowsMultipleSelection = NO;
 #if !TARGET_OS_TV
@@ -1002,7 +1050,9 @@ static NSMutableSet* hostList;
     }
     else {
         [self updateTitle];
+#if TARGET_OS_TV
         [self.view addSubview:hostScrollView];
+#endif
     }
 }
 
@@ -1096,16 +1146,14 @@ static NSMutableSet* hostList;
 {
     [super viewDidAppear:animated];
     
-#if !TARGET_OS_TV
-    [[self revealViewController] setPrimaryViewController:self];
-#endif
-    
     [self.navigationController setNavigationBarHidden:NO animated:YES];
-    
+
+#if TARGET_OS_TV
     // Hide 1px border line
     UIImage* fakeImage = [[UIImage alloc] init];
     [self.navigationController.navigationBar setShadowImage:fakeImage];
     [self.navigationController.navigationBar setBackgroundImage:fakeImage forBarPosition:UIBarPositionAny barMetrics:UIBarMetricsDefault];
+#endif
     
     // Check for a pending shortcut action when appearing
     [self handlePendingShortcutAction];
@@ -1222,6 +1270,23 @@ static NSMutableSet* hostList;
 
 - (void)updateHosts {
     Log(LOG_I, @"Updating hosts...");
+#if !TARGET_OS_TV
+    @synchronized (hostList) {
+        _sortedHostList = [[hostList allObjects] sortedArrayUsingSelector:@selector(compareName:)];
+    }
+    for (TemporaryHost* host in _sortedHostList) {
+        for (TemporaryApp* app in host.appList) {
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+                [self updateBoxArtCacheForApp:app];
+            });
+        }
+    }
+    [self updateHostShortcuts];
+    [self updateTitle];
+    if (_selectedHost == nil) {
+        [self.collectionView reloadData];
+    }
+#else
     [[hostScrollView subviews] makeObjectsPerformSelector:@selector(removeFromSuperview)];
     UIComputerView* addComp = [[UIComputerView alloc] initForAddWithCallback:self];
     UIComputerView* compView;
@@ -1255,6 +1320,7 @@ static NSMutableSet* hostList;
     
     [hostScrollView addSubview:addComp];
     [hostScrollView setContentSize:CGSizeMake(prevEdge + addComp.frame.size.width, hostScrollView.frame.size.height)];
+#endif
 }
 
 - (float) getCompViewX:(UIComputerView*)comp addComp:(UIComputerView*)addComp prevEdge:(float)prevEdge {
@@ -1341,12 +1407,60 @@ static NSMutableSet* hostList;
     
     [hostScrollView removeFromSuperview];
     [self.collectionView reloadData];
+    [self.view setNeedsLayout];
 }
 
+#if !TARGET_OS_TV
+- (void)configureHostCell:(UICollectionViewCell*)cell atIndexPath:(NSIndexPath*)indexPath {
+    for (UIView* view in cell.contentView.subviews) {
+        [view removeFromSuperview];
+    }
+    UIComputerView* computerView = [[UIComputerView alloc] initWithComputer:_sortedHostList[indexPath.item] andCallback:self];
+    computerView.translatesAutoresizingMaskIntoConstraints = NO;
+    [cell.contentView addSubview:computerView];
+    [NSLayoutConstraint activateConstraints:@[
+        [computerView.widthAnchor constraintEqualToConstant:computerView.bounds.size.width],
+        [computerView.heightAnchor constraintEqualToConstant:computerView.bounds.size.height],
+        [computerView.centerXAnchor constraintEqualToAnchor:cell.contentView.centerXAnchor],
+        [computerView.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor]
+    ]];
+}
+#endif
+
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath {
+#if !TARGET_OS_TV
+    if (_selectedHost == nil && indexPath.item == _sortedHostList.count) {
+        UICollectionViewCell* cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"AddHostCell" forIndexPath:indexPath];
+        if (_addHostView.superview != cell.contentView) {
+            [cell.contentView addSubview:_addHostView];
+            [NSLayoutConstraint activateConstraints:@[
+                [_addHostView.centerXAnchor constraintEqualToAnchor:cell.contentView.centerXAnchor],
+                [_addHostView.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor]
+            ]];
+        }
+        return cell;
+    }
+    if (_selectedHost == nil) {
+        UICollectionViewCell* cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"HostCell" forIndexPath:indexPath];
+        [self configureHostCell:cell atIndexPath:indexPath];
+        return cell;
+    }
+#endif
     UICollectionViewCell* cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"AppCell" forIndexPath:indexPath];
-    
     TemporaryApp* app = _sortedAppList[indexPath.row];
+#if !TARGET_OS_TV
+    UIAppView* appView = [cell.contentView viewWithTag:1];
+    if (appView == nil) {
+        appView = [[UIAppView alloc] initWithApp:app cache:_boxArtCache andCallback:self];
+        appView.tag = 1;
+        appView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        [cell.contentView addSubview:appView];
+    }
+    else {
+        [appView configureWithApp:app];
+    }
+    appView.frame = cell.contentView.bounds;
+#else
     UIAppView* appView = [[UIAppView alloc] initWithApp:app cache:_boxArtCache andCallback:self];
     
     if (appView.bounds.size.width > 10.0) {
@@ -1358,6 +1472,8 @@ static NSMutableSet* hostList;
     [cell.subviews.firstObject removeFromSuperview]; // Remove a view that was previously added
     [cell addSubview:appView];
     
+#endif
+
     // Shadow opacity is controlled inside UIAppView based on whether the app
     // is hidden or not during the update cycle.
     UIBezierPath *shadowPath = [UIBezierPath bezierPathWithRect:cell.bounds];
@@ -1384,7 +1500,11 @@ static NSMutableSet* hostList;
         return _sortedAppList.count;
     }
     else {
+#if TARGET_OS_TV
         return 0;
+#else
+        return _selectedHost == nil ? _sortedHostList.count + 1 : 0;
+#endif
     }
 }
 

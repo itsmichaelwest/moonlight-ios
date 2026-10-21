@@ -53,13 +53,12 @@
 #endif
 }
 
-- (void)viewDidAppear:(BOOL)animated
-{
-    [super viewDidAppear:animated];
-    
-#if !TARGET_OS_TV
-    [[self revealViewController] setPrimaryViewController:self];
-#endif
+- (BOOL)prefersStatusBarHidden {
+    return YES;
+}
+
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations {
+    return UIInterfaceOrientationMaskLandscape;
 }
 
 #if TARGET_OS_TV

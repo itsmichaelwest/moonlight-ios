@@ -14,6 +14,7 @@
 #import <AVFoundation/AVFoundation.h>
 
 @implementation SettingsViewController {
+    __weak UIWindow* _sourceWindow;
     NSInteger _bitrate;
     NSInteger _lastSelectedResolutionIndex;
 }
@@ -56,115 +57,171 @@ CGSize resolutionTable[RESOLUTION_TABLE_SIZE];
 
 -(int)getSliderValueForBitrate:(NSInteger)bitrate {
     int i;
-    
+
     for (i = 0; i < (sizeof(bitrateTable) / sizeof(*bitrateTable)); i++) {
         if (bitrate <= bitrateTable[i]) {
             return i;
         }
     }
-    
+
     // Return the last entry in the table
     return i - 1;
 }
 
-// This view is rooted at a ScrollView. To make it scrollable,
-// we'll update content size here.
--(void)viewDidLayoutSubviews {
-    CGFloat highestViewY = 0;
-    
-    // Enumerate the scroll view's subviews looking for the
-    // highest view Y value to set our scroll view's content
-    // size.
-    for (UIView* view in self.scrollView.subviews) {
-        // UIScrollViews have 2 default child views
-        // which represent the horizontal and vertical scrolling
-        // indicators. Ignore any views we don't recognize.
-        if (![view isKindOfClass:[UILabel class]] &&
-            ![view isKindOfClass:[UISegmentedControl class]] &&
-            ![view isKindOfClass:[UISlider class]]) {
-            continue;
-        }
-        
-        CGFloat currentViewY = view.frame.origin.y + view.frame.size.height;
-        if (currentViewY > highestViewY) {
-            highestViewY = currentViewY;
-        }
+- (instancetype)initWithWindow:(UIWindow*)window {
+    self = [super initWithNibName:nil bundle:nil];
+    if (self) {
+        _sourceWindow = window;
     }
-    
-    // Add a bit of padding so the view doesn't end right at the button of the display
-    self.scrollView.contentSize = CGSizeMake(self.scrollView.contentSize.width,
-                                             highestViewY + 20);
+    return self;
 }
 
-// Adjust the subviews for the safe area on the iPhone X.
-- (void)viewSafeAreaInsetsDidChange {
-    [super viewSafeAreaInsetsDidChange];
-    
-    if (@available(iOS 11.0, *)) {
-        for (UIView* view in self.view.subviews) {
-            // HACK: The official safe area is much too large for our purposes
-            // so we'll just use the presence of any safe area to indicate we should
-            // pad by 20.
-            if (self.view.safeAreaInsets.left >= 20 || self.view.safeAreaInsets.right >= 20) {
-                view.frame = CGRectMake(view.frame.origin.x + 20, view.frame.origin.y, view.frame.size.width, view.frame.size.height);
-            }
-        }
-    }
+- (void)loadView {
+    self.scrollView = [[UIScrollView alloc] init];
+    self.view = self.scrollView;
+    self.view.backgroundColor = [UIColor colorWithRed:31.0 / 255.0 green:33.0 / 255.0 blue:36.0 / 255.0 alpha:1];
+    UIStackView* stack = [[UIStackView alloc] init];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.spacing = 8;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.scrollView addSubview:stack];
+    [NSLayoutConstraint activateConstraints:@[
+        [stack.topAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.topAnchor constant:20],
+        [stack.bottomAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.bottomAnchor constant:-20],
+        [stack.leadingAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.leadingAnchor constant:16],
+        [stack.trailingAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.trailingAnchor constant:-16],
+        [stack.widthAnchor constraintEqualToAnchor:self.scrollView.safeAreaLayoutGuide.widthAnchor constant:-32]
+    ]];
+    [self addLabel:@"Resolution" toStack:stack];
+    self.resolutionSelector = [self addSegments:@[@"360p", @"720p", @"1080p", @"4K", @"Safe Area", @"Full", @"Custom"] toStack:stack];
+    self.resolutionDisplayView = [[UIView alloc] init];
+    self.resolutionDisplayView.backgroundColor = UIColor.systemBackgroundColor;
+    [self.resolutionDisplayView.heightAnchor constraintEqualToConstant:35].active = YES;
+    [stack addArrangedSubview:self.resolutionDisplayView];
+    [stack setCustomSpacing:16 afterView:self.resolutionDisplayView];
+    [self addLabel:@"Frame Rate" toStack:stack];
+    self.framerateSelector = [self addSegments:@[@"30 FPS", @"60 FPS", @"120 FPS"] toStack:stack];
+    self.bitrateLabel = [self addLabel:@"Bitrate: 10 Mbps" toStack:stack];
+    self.bitrateSlider = [[UISlider alloc] init];
+    self.bitrateSlider.tintColor = self.resolutionSelector.selectedSegmentTintColor;
+    [stack addArrangedSubview:self.bitrateSlider];
+    [stack setCustomSpacing:16 afterView:self.bitrateSlider];
+    [self addLabel:@"Touch Mode" toStack:stack];
+    self.touchModeSelector = [self addSegments:@[@"Touchpad", @"Touchscreen"] toStack:stack];
+    [self addLabel:@"On-Screen Controls" toStack:stack];
+    self.onscreenControlSelector = [self addSegments:@[@"Off", @"Auto", @"Simple", @"Full"] toStack:stack];
+    [self addLabel:@"Optimize Game Settings" toStack:stack];
+    self.optimizeSettingsSelector = [self addSegments:@[@"No", @"Yes"] toStack:stack];
+    [self addLabel:@"Multi-Controller Mode" toStack:stack];
+    self.multiControllerSelector = [self addSegments:@[@"Single", @"Auto"] toStack:stack];
+    [self addLabel:@"Swap A/B and X/Y Buttons" toStack:stack];
+    self.swapABXYButtonsSelector = [self addSegments:@[@"No", @"Yes"] toStack:stack];
+    [self addLabel:@"Play Audio on PC" toStack:stack];
+    self.audioOnPCSelector = [self addSegments:@[@"No", @"Yes"] toStack:stack];
+    [self addLabel:@"Preferred Codec" toStack:stack];
+    self.codecSelector = [self addSegments:@[@"H.264", @"HEVC", @"AV1", @"Auto"] toStack:stack];
+    [self addLabel:@"HDR (Beta)" toStack:stack];
+    self.hdrSelector = [self addSegments:@[@"No", @"Yes"] toStack:stack];
+    [self addLabel:@"Frame Pacing Preference" toStack:stack];
+    self.framePacingSelector = [self addSegments:@[@"Lowest Latency", @"Smoothest Video"] toStack:stack];
+    [self addLabel:@"Citrix X1 Mouse Support" toStack:stack];
+    self.btMouseSelector = [self addSegments:@[@"No", @"Yes"] toStack:stack];
+    [self addLabel:@"Statistics Overlay" toStack:stack];
+    self.statsOverlaySelector = [self addSegments:@[@"No", @"Yes"] toStack:stack];
+}
+
+- (UILabel*)addLabel:(NSString*)text toStack:(UIStackView*)stack {
+    UILabel* label = [[UILabel alloc] init];
+    label.text = text;
+    label.font = [UIFont boldSystemFontOfSize:17];
+    label.textColor = [UIColor colorWithRed:0.9390243902 green:0.9625305918 blue:1 alpha:1];
+    label.numberOfLines = 0;
+    [stack addArrangedSubview:label];
+    return label;
+}
+
+- (UISegmentedControl*)addSegments:(NSArray<NSString*>*)titles toStack:(UIStackView*)stack {
+    UISegmentedControl* control = [[UISegmentedControl alloc] initWithItems:titles];
+    control.apportionsSegmentWidthsByContent = YES;
+    control.selectedSegmentTintColor = [UIColor colorWithRed:0.6716768742 green:0.6171170473 blue:0.9990298748 alpha:1];
+    [control setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+    [stack addArrangedSubview:control];
+    [stack setCustomSpacing:16 afterView:control];
+    return control;
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    [self updateResolutionDisplayViewText];
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    [self saveSettings];
+}
+
+- (void)done {
+    [self saveSettings];
+    [self.navigationController dismissViewControllerAnimated:YES completion:nil];
 }
 
 BOOL isCustomResolution(CGSize res) {
     if (res.width == 0 && res.height == 0) {
         return NO;
     }
-    
+
     for (int i = 0; i < RESOLUTION_TABLE_CUSTOM_INDEX; i++) {
         if (res.width == resolutionTable[i].width && res.height == resolutionTable[i].height) {
             return NO;
         }
     }
-    
+
     return YES;
 }
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.title = @"Settings";
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(done)];
 
     // Always run settings in dark mode because we want the light fonts
     if (@available(iOS 13.0, tvOS 13.0, *)) {
         self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     }
-    
+
     DataManager* dataMan = [[DataManager alloc] init];
     TemporarySettings* currentSettings = [dataMan getSettings];
-    
+
     // Ensure we pick a bitrate that falls exactly onto a slider notch
     _bitrate = bitrateTable[[self getSliderValueForBitrate:[currentSettings.bitrate intValue]]];
 
     // Get the size of the screen with and without safe area insets
-    UIWindow *window = UIApplication.sharedApplication.windows.firstObject;
+    UIWindow *window = _sourceWindow;
     CGFloat screenScale = window.screen.scale;
-    CGFloat safeAreaWidth = (window.frame.size.width - window.safeAreaInsets.left - window.safeAreaInsets.right) * screenScale;
-    CGFloat fullScreenWidth = window.frame.size.width * screenScale;
-    CGFloat fullScreenHeight = window.frame.size.height * screenScale;
-    
+    CGSize safeSize = UIEdgeInsetsInsetRect(window.bounds, window.safeAreaInsets).size;
+    CGFloat safeAreaWidth = MAX(safeSize.width, safeSize.height) * screenScale;
+    CGFloat safeAreaHeight = MIN(safeSize.width, safeSize.height) * screenScale;
+    CGFloat fullScreenWidth = MAX(window.bounds.size.width, window.bounds.size.height) * screenScale;
+    CGFloat fullScreenHeight = MIN(window.bounds.size.width, window.bounds.size.height) * screenScale;
+
     self.resolutionDisplayView.layer.cornerRadius = 10;
     self.resolutionDisplayView.clipsToBounds = YES;
     UITapGestureRecognizer *resolutionDisplayViewTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(resolutionDisplayViewTapped:)];
     [self.resolutionDisplayView addGestureRecognizer:resolutionDisplayViewTap];
-    
+
     resolutionTable[0] = CGSizeMake(640, 360);
     resolutionTable[1] = CGSizeMake(1280, 720);
     resolutionTable[2] = CGSizeMake(1920, 1080);
     resolutionTable[3] = CGSizeMake(3840, 2160);
-    resolutionTable[4] = CGSizeMake(safeAreaWidth, fullScreenHeight);
+    resolutionTable[4] = CGSizeMake(safeAreaWidth, safeAreaHeight);
     resolutionTable[5] = CGSizeMake(fullScreenWidth, fullScreenHeight);
     resolutionTable[6] = CGSizeMake([currentSettings.width integerValue], [currentSettings.height integerValue]); // custom initial value
-    
+
     // Don't populate the custom entry unless we have a custom resolution
     if (!isCustomResolution(resolutionTable[6])) {
         resolutionTable[6] = CGSizeMake(0, 0);
     }
-    
+
     NSInteger framerate;
     switch ([currentSettings.framerate integerValue]) {
         case 30:
@@ -191,7 +248,7 @@ BOOL isCustomResolution(CGSize res) {
     // Only show the 120 FPS option if we have a > 60-ish Hz display
     bool enable120Fps = false;
     if (@available(iOS 10.3, tvOS 10.3, *)) {
-        if ([UIScreen mainScreen].maximumFramesPerSecond > 62) {
+        if (_sourceWindow.screen.maximumFramesPerSecond > 62) {
             enable120Fps = true;
         }
     }
@@ -217,20 +274,20 @@ BOOL isCustomResolution(CGSize res) {
         case CODEC_PREF_AUTO:
             [self.codecSelector setSelectedSegmentIndex:self.codecSelector.numberOfSegments - 1];
             break;
-            
+
         case CODEC_PREF_AV1:
             [self.codecSelector setSelectedSegmentIndex:2];
             break;
-            
+
         case CODEC_PREF_HEVC:
             [self.codecSelector setSelectedSegmentIndex:1];
             break;
-            
+
         case CODEC_PREF_H264:
             [self.codecSelector setSelectedSegmentIndex:0];
             break;
     }
-    
+
     if (!VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC) || !(AVPlayer.availableHDRModes & AVPlayerHDRModeHDR10)) {
         [self.hdrSelector removeAllSegments];
         [self.hdrSelector insertSegmentWithTitle:@"Unsupported on this device" atIndex:0 animated:NO];
@@ -239,7 +296,7 @@ BOOL isCustomResolution(CGSize res) {
     else {
         [self.hdrSelector setSelectedSegmentIndex:currentSettings.enableHdr ? 1 : 0];
     }
-    
+
     [self.touchModeSelector setSelectedSegmentIndex:currentSettings.absoluteTouchMode ? 1 : 0];
     [self.touchModeSelector addTarget:self action:@selector(touchModeChanged) forControlEvents:UIControlEventValueChanged];
     [self.statsOverlaySelector setSelectedSegmentIndex:currentSettings.statsOverlay ? 1 : 0];
@@ -253,7 +310,7 @@ BOOL isCustomResolution(CGSize res) {
     _lastSelectedResolutionIndex = resolution;
     [self.resolutionSelector setSelectedSegmentIndex:resolution];
     [self.resolutionSelector addTarget:self action:@selector(newResolutionChosen) forControlEvents:UIControlEventValueChanged];
-    [self.framerateSelector setSelectedSegmentIndex:framerate];
+    [self.framerateSelector setSelectedSegmentIndex:MIN(framerate, self.framerateSelector.numberOfSegments - 1)];
     [self.framerateSelector addTarget:self action:@selector(updateBitrate) forControlEvents:UIControlEventValueChanged];
     [self.onscreenControlSelector setSelectedSegmentIndex:onscreenControls];
     [self.onscreenControlSelector setEnabled:!currentSettings.absoluteTouchMode];
@@ -275,7 +332,7 @@ BOOL isCustomResolution(CGSize res) {
     NSInteger width = [self getChosenStreamWidth];
     NSInteger height = [self getChosenStreamHeight];
     NSInteger defaultBitrate;
-    
+
     // This logic is shamelessly stolen from Moonlight Qt:
     // https://github.com/moonlight-stream/moonlight-qt/blob/master/app/settings/streamingpreferences.cpp
     
@@ -328,7 +385,7 @@ BOOL isCustomResolution(CGSize res) {
     defaultBitrate = round(resolutionFactor * frameRateFactor) * 1000;
     _bitrate = MIN(defaultBitrate, 100000);
     [self.bitrateSlider setValue:[self getSliderValueForBitrate:_bitrate] animated:YES];
-    
+
     [self updateBitrateText];
 }
 
@@ -352,7 +409,7 @@ BOOL isCustomResolution(CGSize res) {
         textField.clearButtonMode = UITextFieldViewModeAlways;
         textField.borderStyle = UITextBorderStyleRoundedRect;
         textField.keyboardType = UIKeyboardTypeNumberPad;
-        
+
         if (resolutionTable[RESOLUTION_TABLE_CUSTOM_INDEX].width == 0) {
             textField.text = @"";
         }
@@ -366,7 +423,7 @@ BOOL isCustomResolution(CGSize res) {
         textField.clearButtonMode = UITextFieldViewModeAlways;
         textField.borderStyle = UITextBorderStyleRoundedRect;
         textField.keyboardType = UIKeyboardTypeNumberPad;
-        
+
         if (resolutionTable[RESOLUTION_TABLE_CUSTOM_INDEX].height == 0) {
             textField.text = @"";
         }
@@ -379,7 +436,7 @@ BOOL isCustomResolution(CGSize res) {
         NSArray * textfields = alertController.textFields;
         UITextField *widthField = textfields[0];
         UITextField *heightField = textfields[1];
-        
+
         long width = [widthField.text integerValue];
         long height = [heightField.text integerValue];
         if (width <= 0 || height <= 0) {
@@ -387,7 +444,7 @@ BOOL isCustomResolution(CGSize res) {
             [self.resolutionSelector setSelectedSegmentIndex:self->_lastSelectedResolutionIndex];
             return;
         }
-        
+
         // H.264 maximum
         int maxResolutionDimension = 4096;
         if (@available(iOS 11.0, tvOS 11.0, *)) {
@@ -396,11 +453,11 @@ BOOL isCustomResolution(CGSize res) {
                 maxResolutionDimension = 8192;
             }
         }
-        
+
         // Cap to maximum valid dimensions
         width = MIN(width, maxResolutionDimension);
         height = MIN(height, maxResolutionDimension);
-        
+
         // Cap to minimum valid dimensions
         width = MAX(width, 256);
         height = MAX(height, 256);
@@ -409,7 +466,7 @@ BOOL isCustomResolution(CGSize res) {
         [self updateBitrate];
         [self updateResolutionDisplayViewText];
         self->_lastSelectedResolutionIndex = [self.resolutionSelector selectedSegmentIndex];
-        
+
         UIAlertController *alertController = [UIAlertController alertControllerWithTitle:@"Custom Resolution Selected" message: @"Custom resolutions are not officially supported by GeForce Experience, so it will not set your host display resolution. You will need to set it manually while in game.\n\nResolutions that are not supported by your client or host PC may cause streaming errors." preferredStyle:UIAlertControllerStyleAlert];
         [alertController addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:alertController animated:YES completion:nil];
@@ -437,7 +494,7 @@ BOOL isCustomResolution(CGSize res) {
     CGFloat viewFrameHeight = self.resolutionDisplayView.frame.size.height;
     CGFloat padding = 10;
     CGFloat fontSize = [UIFont smallSystemFontSize];
-    
+
     for (UIView *subview in self.resolutionDisplayView.subviews) {
         [subview removeFromSuperview];
     }
@@ -489,13 +546,13 @@ BOOL isCustomResolution(CGSize res) {
         switch (self.codecSelector.selectedSegmentIndex) {
             case 0:
                 return CODEC_PREF_H264;
-                
+
             case 1:
                 return CODEC_PREF_HEVC;
-                
+
             case 2:
                 return CODEC_PREF_AV1;
-                
+
             default:
                 abort();
         }

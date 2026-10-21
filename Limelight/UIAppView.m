@@ -71,7 +71,7 @@ static UIImage* noImage;
     // Rasterizing the cell layer increases rendering performance by quite a bit
     // but we want it unrasterized for tvOS where it must be scaled.
     self.layer.shouldRasterize = YES;
-    self.layer.rasterizationScale = [UIScreen mainScreen].scale;
+    self.layer.rasterizationScale = self.traitCollection.displayScale;
     
     if (@available(iOS 13.4.1, *)) {
         // Allow the button style to change when moused over
@@ -82,6 +82,21 @@ static UIImage* noImage;
     [self updateAppImage];
     
     return self;
+}
+
+- (void)configureWithApp:(TemporaryApp*)app {
+    _app = app;
+    self.alpha = app.hidden ? 0.4 : 1.0;
+    [self updateAppImage];
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+#if !TARGET_OS_TV
+    _appImage.frame = self.bounds;
+    [self positionSubviews];
+    self.layer.rasterizationScale = self.traitCollection.displayScale;
+#endif
 }
 
 - (void)didMoveToSuperview {
@@ -125,6 +140,7 @@ static UIImage* noImage;
     }
     
     BOOL noAppImage = false;
+    _appImage.image = noImage;
     
     // First check the memory cache
     UIImage* appImage = [_artCache objectForKey:_app];
@@ -163,7 +179,12 @@ static UIImage* noImage;
         _appLabel = [[UILabel alloc] init];
         [_appLabel setTextColor:[UIColor whiteColor]];
         [_appLabel setText:_app.name];
+#if TARGET_OS_TV
         [_appLabel setFont:[UIFont systemFontOfSize:24]];
+#else
+        _appLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+        _appLabel.adjustsFontForContentSizeCategory = YES;
+#endif
         [_appLabel setBaselineAdjustment:UIBaselineAdjustmentAlignCenters];
         [_appLabel setTextAlignment:NSTextAlignmentCenter];
         [_appLabel setLineBreakMode:NSLineBreakByWordWrapping];

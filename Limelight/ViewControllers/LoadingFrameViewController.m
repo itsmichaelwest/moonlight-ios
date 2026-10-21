@@ -12,14 +12,31 @@
     BOOL presented;
 };
 
+#if !TARGET_OS_TV
+- (void)loadView {
+    self.view = [[UIView alloc] init];
+    self.view.backgroundColor = [UIColor colorWithWhite:0 alpha:0.5];
+    self.modalPresentationStyle = UIModalPresentationOverFullScreen;
+    UIActivityIndicatorView* spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
+    spinner.color = UIColor.whiteColor;
+    spinner.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:spinner];
+    self.loadingSpinner = spinner;
+    [NSLayoutConstraint activateConstraints:@[
+        [spinner.centerXAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.centerXAnchor],
+        [spinner.centerYAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.centerYAnchor]
+    ]];
+    [spinner startAnimating];
+}
+#else
 - (void)viewDidLoad {
     [super viewDidLoad];
-    // center the loading spinner
-    self.loadingSpinner.center = CGPointMake(self.view.frame.size.width / 2, self.view.frame.size.height / 2);
+    self.loadingSpinner.center = CGPointMake(self.view.bounds.size.width / 2, self.view.bounds.size.height / 2);
 }
+#endif
 
 - (UIViewController*) activeViewController {
-    UIViewController *topController = [UIApplication sharedApplication].keyWindow.rootViewController;
+    UIViewController* topController = self.presentingController.navigationController ?: self.presentingController;
     
     while (topController.presentedViewController) {
         topController = topController.presentedViewController;

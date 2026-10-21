@@ -1,5 +1,27 @@
 #import "SceneDelegate.h"
 #import "AppDelegate.h"
+#import "MainFrameViewController.h"
+
+#if !TARGET_OS_TV
+@interface MoonlightNavigationController : UINavigationController
+@end
+
+@implementation MoonlightNavigationController
+
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations {
+    return self.topViewController.supportedInterfaceOrientations;
+}
+
+- (UIViewController*)childViewControllerForStatusBarHidden {
+    return self.topViewController;
+}
+
+- (UIViewController*)childViewControllerForStatusBarStyle {
+    return self.topViewController;
+}
+
+@end
+#endif
 
 @implementation SceneDelegate
 
@@ -9,20 +31,20 @@
     }
 
 #if !TARGET_OS_TV
-    // Store the launch shortcut before the storyboard loads the host browser.
+    // Store the launch shortcut before loading the host browser.
     AppDelegate *appDelegate = (AppDelegate *)UIApplication.sharedApplication.delegate;
     appDelegate.pcUuidToLoad = connectionOptions.shortcutItem.userInfo[@"UUID"];
 #endif
 
-    UIWindowScene *windowScene = (UIWindowScene *)scene;
-#if TARGET_OS_TV
-    NSString *storyboardName = @"Main";
-#else
-    NSString *storyboardName = windowScene.traitCollection.userInterfaceIdiom == UIUserInterfaceIdiomPad ? @"iPad" : @"iPhone";
-#endif
-    UIStoryboard *storyboard = [UIStoryboard storyboardWithName:storyboardName bundle:nil];
+    UIWindowScene* windowScene = (UIWindowScene*)scene;
     self.window = [[UIWindow alloc] initWithWindowScene:windowScene];
+#if TARGET_OS_TV
+    UIStoryboard* storyboard = [UIStoryboard storyboardWithName:@"Main" bundle:nil];
     self.window.rootViewController = [storyboard instantiateInitialViewController];
+#else
+    MainFrameViewController* browser = [[MainFrameViewController alloc] init];
+    self.window.rootViewController = [[MoonlightNavigationController alloc] initWithRootViewController:browser];
+#endif
     [self.window makeKeyAndVisible];
 }
 
