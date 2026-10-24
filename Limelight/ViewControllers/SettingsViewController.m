@@ -49,7 +49,7 @@ static const int bitrateTable[] = {
     150000,
 };
 
-const int RESOLUTION_TABLE_SIZE = 7;
+const int RESOLUTION_TABLE_SIZE = 8;
 const int RESOLUTION_TABLE_CUSTOM_INDEX = RESOLUTION_TABLE_SIZE - 1;
 CGSize resolutionTable[RESOLUTION_TABLE_SIZE];
 
@@ -91,7 +91,7 @@ CGSize resolutionTable[RESOLUTION_TABLE_SIZE];
         [stack.widthAnchor constraintEqualToAnchor:self.scrollView.safeAreaLayoutGuide.widthAnchor constant:-32]
     ]];
     [self addLabel:@"Resolution" toStack:stack];
-    self.resolutionSelector = [self addSegments:@[@"360p", @"720p", @"1080p", @"4K", @"Safe Area", @"Full", @"Custom"] toStack:stack];
+    self.resolutionSelector = [self addSegments:@[@"360p", @"720p", @"1080p", @"4K", @"Safe Area", @"Full", @"iPhone Duo", @"Custom"] toStack:stack];
     self.resolutionDisplayView = [[UIView alloc] init];
     [self.resolutionDisplayView.heightAnchor constraintEqualToConstant:35].active = YES;
     [stack addArrangedSubview:self.resolutionDisplayView];
@@ -204,11 +204,12 @@ BOOL isCustomResolution(CGSize res) {
     resolutionTable[3] = CGSizeMake(3840, 2160);
     resolutionTable[4] = CGSizeMake(safeAreaWidth, safeAreaHeight);
     resolutionTable[5] = CGSizeMake(fullScreenWidth, fullScreenHeight);
-    resolutionTable[6] = CGSizeMake([currentSettings.width integerValue], [currentSettings.height integerValue]); // custom initial value
+    resolutionTable[6] = CGSizeMake(2034, 1398);
+    resolutionTable[RESOLUTION_TABLE_CUSTOM_INDEX] = CGSizeMake([currentSettings.width integerValue], [currentSettings.height integerValue]); // custom initial value
 
     // Don't populate the custom entry unless we have a custom resolution
-    if (!isCustomResolution(resolutionTable[6])) {
-        resolutionTable[6] = CGSizeMake(0, 0);
+    if (!isCustomResolution(resolutionTable[RESOLUTION_TABLE_CUSTOM_INDEX])) {
+        resolutionTable[RESOLUTION_TABLE_CUSTOM_INDEX] = CGSizeMake(0, 0);
     }
 
     NSInteger framerate;
@@ -233,6 +234,20 @@ BOOL isCustomResolution(CGSize res) {
             break;
         }
     }
+
+    // Prefer the fixed Duo preset when Full happens to have the same dimensions.
+    if ([currentSettings.width integerValue] == 2034 && [currentSettings.height integerValue] == 1398) {
+        resolution = 6;
+    }
+    [self.resolutionSelector setEnabled:NO forSegmentAtIndex:6];
+#if __has_include(<UIKit/UIHingeInteraction.h>)
+    if (@available(iOS 27.1, *)) {
+        __weak SettingsViewController* weakSelf = self;
+        [self.view addInteraction:[[UIHingeInteraction alloc] initWithUpdateHandler:^(UIHingeInteraction* interaction, UIHingeInteractionUpdate* update) {
+            [weakSelf.resolutionSelector setEnabled:update.hinge != nil forSegmentAtIndex:6];
+        }]];
+    }
+#endif
 
     // Only show the 120 FPS option if we have a > 60-ish Hz display
     bool enable120Fps = false;
