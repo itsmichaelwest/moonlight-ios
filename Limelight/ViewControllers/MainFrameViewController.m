@@ -918,6 +918,9 @@ static NSMutableSet* hostList;
     collectionView.translatesAutoresizingMaskIntoConstraints = NO;
     collectionView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAlways;
     collectionView.alwaysBounceVertical = YES;
+    if (@available(iOS 26.0, *)) {
+        collectionView.topEdgeEffect.style = UIScrollEdgeEffectStyle.softStyle;
+    }
     self.collectionView = collectionView;
     [NSLayoutConstraint activateConstraints:@[
         [collectionView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
