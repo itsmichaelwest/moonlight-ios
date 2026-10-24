@@ -58,6 +58,7 @@
     BOOL _initialHostUserInitiated;
     BOOL _autoSelectHost;
     BOOL _acceptHostUpdates;
+    BOOL _browserVisible;
 #endif
     NSArray* _sortedAppList;
     NSCache* _boxArtCache;
@@ -126,14 +127,18 @@ static NSMutableSet* hostList;
 }
 
 - (void)updateTitle {
+    NSString* title;
     if (_selectedHost != nil) {
-        self.title = _selectedHost.name;
+        title = _selectedHost.name;
     }
     else if ([hostList count] == 0) {
-        self.title = @"Searching for PCs on your network...";
+        title = @"Searching for PCs on your network...";
     }
     else {
-        self.title = @"Select Host";
+        title = @"Select Host";
+    }
+    if (![self.title isEqualToString:title]) {
+        self.title = title;
     }
 }
 
@@ -356,7 +361,9 @@ static NSMutableSet* hostList;
     Log(LOG_D, @"Clicked host: %@", host.name);
     _selectedHost = host;
     [self updateTitle];
+#if TARGET_OS_TV
     [self disableNavigation];
+#endif
 #if !TARGET_OS_TV
     [self.collectionView reloadData];
     [self.view setNeedsLayout];
@@ -964,7 +971,9 @@ static NSMutableSet* hostList;
 }
 
 - (void) hideLoadingFrame:(void (^)(void))completion {
+#if TARGET_OS_TV
     [self enableNavigation];
+#endif
     [_loadingFrame dismissLoadingFrame:completion];
 }
 
@@ -1004,6 +1013,7 @@ static NSMutableSet* hostList;
     self.settingsButton.accessibilityLabel = @"Settings";
     self.navigationItem.rightBarButtonItem = self.settingsButton;
     self.navigationItem.backButtonTitle = @"Hosts";
+    self.navigationItem.backButtonDisplayMode = UINavigationItemBackButtonDisplayModeMinimal;
 #else
     // The settings button will direct the user into the Settings app on tvOS
     [_settingsButton setTarget:self];
@@ -1076,6 +1086,9 @@ static NSMutableSet* hostList;
 #if !TARGET_OS_TV
     _autoSelectHost = _hostBrowser == nil && hostList.count == 1;
     [self updateTitle];
+    if (_selectedHost.appList.count > 0) {
+        [self updateAppsForHost:_selectedHost];
+    }
 #else
     if ([hostList count] == 1) {
         [self hostClicked:[hostList anyObject] view:nil];
@@ -1164,6 +1177,11 @@ static NSMutableSet* hostList;
 
 -(void)handleReturnToForeground
 {
+#if !TARGET_OS_TV
+    if (!_background) {
+        return;
+    }
+#endif
     _background = NO;
     
     [self beginForegroundRefresh];
@@ -1182,6 +1200,16 @@ static NSMutableSet* hostList;
 - (void)viewDidAppear:(BOOL)animated
 {
     [super viewDidAppear:animated];
+#if !TARGET_OS_TV
+    _acceptHostUpdates = YES;
+    if (_browserVisible) {
+        return;
+    }
+    _browserVisible = YES;
+    [_discMan stopDiscovery];
+    _discMan = [[DiscoveryManager alloc] initWithHosts:[hostList allObjects] andCallback:self];
+    [self beginForegroundRefresh];
+#endif
     
 #if TARGET_OS_TV
     [self.navigationController setNavigationBarHidden:NO animated:YES];
@@ -1225,11 +1253,7 @@ static NSMutableSet* hostList;
     [super viewWillAppear:animated];
 #if !TARGET_OS_TV
     [self.navigationController setNavigationBarHidden:NO animated:animated];
-    _acceptHostUpdates = YES;
-    [_discMan stopDiscovery];
-    _discMan = [[DiscoveryManager alloc] initWithHosts:[hostList allObjects] andCallback:self];
-#endif
-    
+#else
     // We can get here on home press while streaming
     // since the stream view segues to us just before
     // entering the background. We can't check the app
@@ -1242,20 +1266,25 @@ static NSMutableSet* hostList;
     // view, so we won't get a return to active notification
     // for that which would normally fire beginForegroundRefresh.
     [self beginForegroundRefresh];
+#endif
 }
 
 #if !TARGET_OS_TV
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
     _acceptHostUpdates = NO;
-    [_discMan stopDiscovery];
 }
 #endif
 
 - (void)viewDidDisappear:(BOOL)animated
 {
     [super viewDidDisappear:animated];
+    // when discovery stops, we must create a new instance because
+    // you cannot restart an NSOperation when it is finished
+    [_discMan stopDiscovery];
 #if !TARGET_OS_TV
+    _browserVisible = NO;
+    _acceptHostUpdates = NO;
     if (_hostBrowser != nil && ![self.navigationController.viewControllers containsObject:self]) {
         _selectedHost = nil;
         [_appManager stopRetrieving];
@@ -1264,12 +1293,11 @@ static NSMutableSet* hostList;
     }
 #endif
     
-    // when discovery stops, we must create a new instance because
-    // you cannot restart an NSOperation when it is finished
-    [_discMan stopDiscovery];
     
+#if TARGET_OS_TV
     // Purge the box art cache
     [_boxArtCache removeAllObjects];
+#endif
     
     // Remove our lifetime observers to avoid triggering them
     // while streaming
