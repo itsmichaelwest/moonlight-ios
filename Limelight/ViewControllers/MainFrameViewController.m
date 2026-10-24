@@ -910,6 +910,7 @@ static NSMutableSet* hostList;
     AppCollectionView* collectionView = [[AppCollectionView alloc] initWithFrame:self.view.bounds collectionViewLayout:self.collectionViewLayout];
     collectionView.translatesAutoresizingMaskIntoConstraints = NO;
     collectionView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAlways;
+    collectionView.alwaysBounceVertical = YES;
     self.collectionView = collectionView;
     [NSLayoutConstraint activateConstraints:@[
         [collectionView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
@@ -1551,6 +1552,7 @@ static NSMutableSet* hostList;
     
 #endif
 
+#if TARGET_OS_TV
     // Shadow opacity is controlled inside UIAppView based on whether the app
     // is hidden or not during the update cycle.
     UIBezierPath *shadowPath = [UIBezierPath bezierPathWithRect:cell.bounds];
@@ -1559,9 +1561,9 @@ static NSMutableSet* hostList;
     cell.layer.shadowOffset = CGSizeMake(1.0f, 5.0f);
     cell.layer.shadowPath = shadowPath.CGPath;
     
-#if !TARGET_OS_TV
-    cell.layer.borderWidth = 1;
-    cell.layer.borderColor = [[UIColor colorWithRed:0 green:0 blue:0 alpha:0.3f] CGColor];
+#else
+    cell.clipsToBounds = NO;
+    cell.contentView.clipsToBounds = NO;
     cell.exclusiveTouch = YES;
 #endif
 

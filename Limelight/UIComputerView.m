@@ -44,8 +44,14 @@ static const int LABEL_DY = 20;
     [_hostIcon setImage:[UIImage imageNamed:@"Computer"]];
     
     self.layer.shadowColor = [[UIColor blackColor] CGColor];
+#if TARGET_OS_TV
     self.layer.shadowOffset = CGSizeMake(5,8);
     self.layer.shadowOpacity = 0.3;
+#else
+    self.layer.shadowOffset = CGSizeMake(0, 3);
+    self.layer.shadowRadius = 6;
+    self.layer.shadowOpacity = 0.2;
+#endif
 
     [self addTarget:self action:@selector(hostButtonSelected:) forControlEvents:UIControlEventTouchDown];
     [self addTarget:self action:@selector(hostButtonDeselected:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchCancel | UIControlEventTouchDragExit];

@@ -43,6 +43,18 @@ static UIImage* noImage;
     [self setAlpha:app.hidden ? 0.4 : 1.0];
     
     _appImage = [[UIImageView alloc] initWithFrame:self.frame];
+#if !TARGET_OS_TV
+    _appImage.layer.cornerRadius = 8;
+    _appImage.layer.cornerCurve = kCACornerCurveContinuous;
+    [self registerForTraitChanges:@[UITraitUserInterfaceStyle.class, UITraitAccessibilityContrast.class] withHandler:^(UIAppView* view, UITraitCollection* previousTraitCollection) {
+        [view setNeedsLayout];
+    }];
+    _appImage.clipsToBounds = YES;
+    self.layer.shadowColor = UIColor.blackColor.CGColor;
+    self.layer.shadowOffset = CGSizeMake(0, 3);
+    self.layer.shadowRadius = 6;
+    self.layer.shadowOpacity = app.hidden ? 0 : 0.2;
+#endif
     [_appImage setImage:noImage];
     [self addSubview:_appImage];
     
@@ -87,6 +99,9 @@ static UIImage* noImage;
 - (void)configureWithApp:(TemporaryApp*)app {
     _app = app;
     self.alpha = app.hidden ? 0.4 : 1.0;
+#if !TARGET_OS_TV
+    self.layer.shadowOpacity = app.hidden ? 0 : 0.2;
+#endif
     [self updateAppImage];
 }
 
@@ -94,6 +109,9 @@ static UIImage* noImage;
     [super layoutSubviews];
 #if !TARGET_OS_TV
     _appImage.frame = self.bounds;
+    _appImage.layer.borderWidth = 1.0 / MAX(self.traitCollection.displayScale, 1.0);
+    _appImage.layer.borderColor = [UIColor.separatorColor resolvedColorWithTraitCollection:self.traitCollection].CGColor;
+    self.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:self.bounds cornerRadius:8].CGPath;
     [self positionSubviews];
     self.layer.rasterizationScale = self.traitCollection.displayScale;
 #endif
@@ -246,7 +264,11 @@ static UIImage* noImage;
     // Show no shadow for hidden apps. Because we adjust the opacity of the
     // cells for hidden apps, it makes them look bad when the shadow draws
     // through the app tile.
+#if TARGET_OS_TV
     self.superview.layer.shadowOpacity = _app.hidden ? 0.0f : 0.5f;
+#else
+    self.layer.shadowOpacity = _app.hidden ? 0.0f : 0.2f;
+#endif
     
     // Update opacity if neccessary
     [self setAlpha:_app.hidden ? 0.4 : 1.0];
