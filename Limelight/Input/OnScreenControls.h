@@ -48,6 +48,14 @@ typedef NS_ENUM(NSInteger, OnScreenControlsLevel) {
     OnScreenControlsLevelAutoGCExtendedGamepadWithStickButtons
 };
 
+typedef NS_ENUM(NSInteger, OnScreenControlsLayout) {
+    OnScreenControlsLayoutXbox,
+    OnScreenControlsLayoutPlayStation
+};
+
++ (OnScreenControlsLayout) savedLayout;
++ (void) saveLayout:(OnScreenControlsLayout)layout;
+
 - (id) initWithView:(UIView*)view controllerSup:(ControllerSupport*)controllerSupport streamConfig:(StreamConfiguration*)streamConfig;
 - (BOOL) handleTouchDownEvent:(NSSet*)touches;
 - (BOOL) handleTouchUpEvent:(NSSet*)touches;

@@ -23,6 +23,7 @@ static UIColor* ColorFromHex(uint32_t hex) {
 }
 
 static NSString* const OnScreenControlsThemeKey = @"onscreenControlsTheme";
+static NSString* const OnScreenControlsLayoutKey = @"onscreenControlsLayout";
 
 @implementation OnScreenControlsTheme
 
@@ -178,6 +179,7 @@ static const NSInteger StickCapTag = 2;
 
 @implementation OnScreenControls {
     OnScreenControlsTheme* _theme;
+    OnScreenControlsLayout _layout;
     NSMapTable<CALayer*, UIView*>* _controlViews;
     GamepadDirectionGroup* _directionGroup;
     UIView* _dpadVerticalBar;
@@ -326,6 +328,8 @@ static float L3_Y;
     _deadTouches = [[NSMutableArray alloc] init];
     _swapABXY = streamConfig.swapABXYButtons;
     _theme = [OnScreenControlsTheme savedTheme];
+    _layout = [OnScreenControls savedLayout];
+    BOOL playStation = _layout == OnScreenControlsLayoutPlayStation;
 
     _controlViews = [NSMapTable strongToStrongObjectsMapTable];
     if (@available(iOS 26.0, tvOS 26.0, *)) {
@@ -338,10 +342,24 @@ static float L3_Y;
     _dpadHorizontalBar = [self glassViewWithTint:_theme.capColor cornerRadius:8];
 
     NSArray<UIColor*>* legends = _theme.legendColors;
-    _aButton = [self buttonWithTitle:@"A" symbol:nil label:nil size:CGSizeMake(FACE_BUTTON_SIZE, FACE_BUTTON_SIZE) tint:_theme.capColor glyph:legends[0]];
-    _bButton = [self buttonWithTitle:@"B" symbol:nil label:nil size:CGSizeMake(FACE_BUTTON_SIZE, FACE_BUTTON_SIZE) tint:_theme.capColor glyph:legends[1]];
-    _xButton = [self buttonWithTitle:@"X" symbol:nil label:nil size:CGSizeMake(FACE_BUTTON_SIZE, FACE_BUTTON_SIZE) tint:_theme.capColor glyph:legends[2]];
-    _yButton = [self buttonWithTitle:@"Y" symbol:nil label:nil size:CGSizeMake(FACE_BUTTON_SIZE, FACE_BUTTON_SIZE) tint:_theme.capColor glyph:legends[3]];
+    CGSize faceSize = CGSizeMake(FACE_BUTTON_SIZE, FACE_BUTTON_SIZE);
+    if (playStation) {
+        // Plain shapes, without the multicolored legends of either controller
+        if (![legends[0] isEqual:legends[1]]) {
+            UIColor* neutral = [UIColor colorWithWhite:.85 alpha:1];
+            legends = @[neutral, neutral, neutral, neutral];
+        }
+        _aButton = [self buttonWithTitle:nil symbol:@"xmark" label:@"Cross" size:faceSize tint:_theme.capColor glyph:legends[0]];
+        _bButton = [self buttonWithTitle:nil symbol:@"circle" label:@"Circle" size:faceSize tint:_theme.capColor glyph:legends[1]];
+        _xButton = [self buttonWithTitle:nil symbol:@"square" label:@"Square" size:faceSize tint:_theme.capColor glyph:legends[2]];
+        _yButton = [self buttonWithTitle:nil symbol:@"triangle" label:@"Triangle" size:faceSize tint:_theme.capColor glyph:legends[3]];
+    }
+    else {
+        _aButton = [self buttonWithTitle:@"A" symbol:nil label:nil size:faceSize tint:_theme.capColor glyph:legends[0]];
+        _bButton = [self buttonWithTitle:@"B" symbol:nil label:nil size:faceSize tint:_theme.capColor glyph:legends[1]];
+        _xButton = [self buttonWithTitle:@"X" symbol:nil label:nil size:faceSize tint:_theme.capColor glyph:legends[2]];
+        _yButton = [self buttonWithTitle:@"Y" symbol:nil label:nil size:faceSize tint:_theme.capColor glyph:legends[3]];
+    }
 
     // The D-pad arms share the face button tint, as on the controller
     UIColor* dpadGlyph = _theme.capColor != nil ? [UIColor colorWithWhite:1 alpha:.55] : [UIColor colorWithWhite:1 alpha:.7];
@@ -353,16 +371,26 @@ static float L3_Y;
 
     UIColor* body = _theme.bodyColor;
     UIColor* bodyGlyph = _theme.bodyGlyphColor;
-    _l1Button = [self buttonWithTitle:@"LB" symbol:nil label:nil size:BUMPER_SIZE tint:body glyph:bodyGlyph];
-    _r1Button = [self buttonWithTitle:@"RB" symbol:nil label:nil size:BUMPER_SIZE tint:body glyph:bodyGlyph];
-    _l2Button = [self buttonWithTitle:@"LT" symbol:nil label:nil size:TRIGGER_SIZE tint:body glyph:bodyGlyph];
-    _r2Button = [self buttonWithTitle:@"RT" symbol:nil label:nil size:TRIGGER_SIZE tint:body glyph:bodyGlyph];
-    _l3Button = [self buttonWithTitle:@"LS" symbol:nil label:nil size:CGSizeMake(STICK_BUTTON_SIZE, STICK_BUTTON_SIZE) tint:body glyph:bodyGlyph];
-    _r3Button = [self buttonWithTitle:@"RS" symbol:nil label:nil size:CGSizeMake(STICK_BUTTON_SIZE, STICK_BUTTON_SIZE) tint:body glyph:bodyGlyph];
+    CGSize stickButtonSize = CGSizeMake(STICK_BUTTON_SIZE, STICK_BUTTON_SIZE);
+    CGSize systemSize = CGSizeMake(SYSTEM_BUTTON_SIZE, SYSTEM_BUTTON_SIZE);
+    CGSize guideSize = CGSizeMake(GUIDE_BUTTON_SIZE, GUIDE_BUTTON_SIZE);
+    _l1Button = [self buttonWithTitle:playStation ? @"L1" : @"LB" symbol:nil label:nil size:BUMPER_SIZE tint:body glyph:bodyGlyph];
+    _r1Button = [self buttonWithTitle:playStation ? @"R1" : @"RB" symbol:nil label:nil size:BUMPER_SIZE tint:body glyph:bodyGlyph];
+    _l2Button = [self buttonWithTitle:playStation ? @"L2" : @"LT" symbol:nil label:nil size:TRIGGER_SIZE tint:body glyph:bodyGlyph];
+    _r2Button = [self buttonWithTitle:playStation ? @"R2" : @"RT" symbol:nil label:nil size:TRIGGER_SIZE tint:body glyph:bodyGlyph];
+    _l3Button = [self buttonWithTitle:playStation ? @"L3" : @"LS" symbol:nil label:nil size:stickButtonSize tint:body glyph:bodyGlyph];
+    _r3Button = [self buttonWithTitle:playStation ? @"R3" : @"RS" symbol:nil label:nil size:stickButtonSize tint:body glyph:bodyGlyph];
     _l3Button.borderColor = _r3Button.borderColor = legends[0].CGColor;
-    _startButton = [self buttonWithTitle:nil symbol:@"line.3.horizontal" label:@"Menu" size:CGSizeMake(SYSTEM_BUTTON_SIZE, SYSTEM_BUTTON_SIZE) tint:body glyph:bodyGlyph];
-    _selectButton = [self buttonWithTitle:nil symbol:@"square.on.square" label:@"View" size:CGSizeMake(SYSTEM_BUTTON_SIZE, SYSTEM_BUTTON_SIZE) tint:body glyph:bodyGlyph];
-    _guideButton = [self buttonWithTitle:nil symbol:@"xbox.logo" label:@"Xbox" size:CGSizeMake(GUIDE_BUTTON_SIZE, GUIDE_BUTTON_SIZE) tint:_theme.guideColor glyph:_theme.guideGlyphColor];
+    if (playStation) {
+        _startButton = [self buttonWithTitle:nil symbol:@"line.3.horizontal" label:@"Options" size:systemSize tint:body glyph:bodyGlyph];
+        _selectButton = [self buttonWithTitle:nil symbol:@"square.and.arrow.up" label:@"Create" size:systemSize tint:body glyph:bodyGlyph];
+        _guideButton = [self buttonWithTitle:nil symbol:@"playstation.logo" label:@"PlayStation" size:guideSize tint:_theme.guideColor glyph:_theme.guideGlyphColor];
+    }
+    else {
+        _startButton = [self buttonWithTitle:nil symbol:@"line.3.horizontal" label:@"Menu" size:systemSize tint:body glyph:bodyGlyph];
+        _selectButton = [self buttonWithTitle:nil symbol:@"square.on.square" label:@"View" size:systemSize tint:body glyph:bodyGlyph];
+        _guideButton = [self buttonWithTitle:nil symbol:@"xbox.logo" label:@"Xbox" size:guideSize tint:_theme.guideColor glyph:_theme.guideGlyphColor];
+    }
 
     _leftStickBackground = [self stickWell];
     _rightStickBackground = [self stickWell];
@@ -437,8 +465,9 @@ static float L3_Y;
     }
     else {
         UIImage* image = [UIImage systemImageNamed:symbol];
-        if (image == nil && [symbol isEqualToString:@"xbox.logo"]) {
-            image = [UIImage systemImageNamed:@"logo.xbox"];
+        if (image == nil && [symbol hasSuffix:@".logo"]) {
+            // Earlier releases name brand logos the other way around
+            image = [UIImage systemImageNamed:[@"logo." stringByAppendingString:[symbol stringByDeletingPathExtension]]];
         }
         CGFloat pointSize = isDirection ? shortSide * .27 : shortSide * .4;
         image = [image imageByApplyingSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:pointSize weight:UIImageSymbolWeightSemibold]];
@@ -666,6 +695,15 @@ static ControlSizes ScaledSizes(ControlSizes sizes, CGFloat scale) {
         sizes.systemButton * scale, sizes.guideButton * scale, sizes.stickButton * scale,
         sizes.stickInner * scale, sizes.stickOuter * scale,
     };
+}
+
++ (OnScreenControlsLayout) savedLayout {
+    return [[NSUserDefaults standardUserDefaults] integerForKey:OnScreenControlsLayoutKey] == OnScreenControlsLayoutPlayStation ?
+        OnScreenControlsLayoutPlayStation : OnScreenControlsLayoutXbox;
+}
+
++ (void) saveLayout:(OnScreenControlsLayout)layout {
+    [[NSUserDefaults standardUserDefaults] setInteger:layout forKey:OnScreenControlsLayoutKey];
 }
 
 - (void) layoutControls {
@@ -907,7 +945,8 @@ static ControlSizes ScaledSizes(ControlSizes sizes, CGFloat scale) {
 
 // The deck under the thumbs follows the controller: the left stick and face buttons where the
 // thumbs rest, with the D-pad and right stick lower and further in, and the shoulder buttons
-// above them. Positions are for a deck of DECK_REFERENCE_SIZE, scaled to the actual deck.
+// above them. The PlayStation layout swaps the left stick and D-pad. Positions are for a deck
+// of DECK_REFERENCE_SIZE, scaled to the actual deck.
 - (void) setupDeckControls
 {
     CGFloat scale = DeckScale(_controlArea.size);
@@ -915,12 +954,13 @@ static ControlSizes ScaledSizes(ControlSizes sizes, CGFloat scale) {
     CGFloat originY = CGRectGetMidY(_controlArea) - DECK_REFERENCE_SIZE.height * scale / 2;
 #define DECK_X(x) (originX + (x) * scale)
 #define DECK_Y(y) (originY + (y) * scale)
-    LS_CENTER_X = DECK_X(112);
-    LS_CENTER_Y = DECK_Y(232);
+    BOOL playStation = _layout == OnScreenControlsLayoutPlayStation;
+    LS_CENTER_X = DECK_X(playStation ? 240 : 112);
+    LS_CENTER_Y = DECK_Y(playStation ? 345 : 232);
     BUTTON_CENTER_X = DECK_X(557);
     BUTTON_CENTER_Y = DECK_Y(232);
-    D_PAD_CENTER_X = DECK_X(240);
-    D_PAD_CENTER_Y = DECK_Y(345);
+    D_PAD_CENTER_X = DECK_X(playStation ? 112 : 240);
+    D_PAD_CENTER_Y = DECK_Y(playStation ? 232 : 345);
     RS_CENTER_X = DECK_X(429);
     RS_CENTER_Y = DECK_Y(345);
 
@@ -933,7 +973,7 @@ static ControlSizes ScaledSizes(ControlSizes sizes, CGFloat scale) {
     R1_X = DECK_X(573);
     R1_Y = DECK_Y(108);
 
-    // View, Xbox, and Menu sit in a row between the shoulder buttons
+    // The system buttons sit in a row between the shoulder buttons
     SELECT_X = DECK_X(270);
     SELECT_Y = DECK_Y(60);
     START_X = DECK_X(399);

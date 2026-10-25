@@ -107,6 +107,8 @@ CGSize resolutionTable[RESOLUTION_TABLE_SIZE];
     self.touchModeSelector = [self addSegments:@[@"Touchpad", @"Touchscreen"] toStack:stack];
     [self addLabel:@"On-Screen Controls" toStack:stack];
     self.onscreenControlSelector = [self addSegments:@[@"Off", @"Auto", @"Simple", @"Full"] toStack:stack];
+    [self addLabel:@"On-Screen Controls Layout" toStack:stack];
+    self.onscreenControlsLayoutSelector = [self addSegments:@[@"Xbox", @"PlayStation"] toStack:stack];
     [self addLabel:@"On-Screen Controls Style" toStack:stack];
     self.onscreenControlsThemeButton = [self addThemeMenuToStack:stack];
     [self addLabel:@"Optimize Game Settings" toStack:stack];
@@ -365,6 +367,8 @@ BOOL isCustomResolution(CGSize res) {
     [self.framerateSelector addTarget:self action:@selector(updateBitrate) forControlEvents:UIControlEventValueChanged];
     [self.onscreenControlSelector setSelectedSegmentIndex:onscreenControls];
     [self.onscreenControlSelector setEnabled:!currentSettings.absoluteTouchMode];
+    [self.onscreenControlsLayoutSelector setSelectedSegmentIndex:[OnScreenControls savedLayout]];
+    [self.onscreenControlsLayoutSelector setEnabled:!currentSettings.absoluteTouchMode];
     [self.onscreenControlsThemeButton setEnabled:!currentSettings.absoluteTouchMode];
     [self.bitrateSlider setMinimumValue:0];
     [self.bitrateSlider setMaximumValue:(sizeof(bitrateTable) / sizeof(*bitrateTable)) - 1];
@@ -377,6 +381,7 @@ BOOL isCustomResolution(CGSize res) {
 - (void) touchModeChanged {
     // Disable on-screen controls in absolute touch mode
     [self.onscreenControlSelector setEnabled:[self.touchModeSelector selectedSegmentIndex] == 0];
+    [self.onscreenControlsLayoutSelector setEnabled:[self.touchModeSelector selectedSegmentIndex] == 0];
     [self.onscreenControlsThemeButton setEnabled:[self.touchModeSelector selectedSegmentIndex] == 0];
 }
 
@@ -664,6 +669,7 @@ BOOL isCustomResolution(CGSize res) {
                       btMouseSupport:btMouseSupport
                    absoluteTouchMode:absoluteTouchMode
                         statsOverlay:statsOverlay];
+    [OnScreenControls saveLayout:[self.onscreenControlsLayoutSelector selectedSegmentIndex]];
     for (OnScreenControlsTheme* theme in [OnScreenControlsTheme themes]) {
         for (UIAction* action in self.onscreenControlsThemeButton.menu.children) {
             if (action.state == UIMenuElementStateOn && [action.identifier isEqualToString:theme.identifier]) {
