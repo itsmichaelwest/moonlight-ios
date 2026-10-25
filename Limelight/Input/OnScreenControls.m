@@ -15,7 +15,173 @@
 #define UPDATE_BUTTON(x, y) (buttonFlags = \
 (y) ? (buttonFlags | (x)) : (buttonFlags & ~(x)))
 
+static UIColor* ColorFromHex(uint32_t hex) {
+    return [UIColor colorWithRed:((hex >> 16) & 0xFF) / 255.f
+                           green:((hex >> 8) & 0xFF) / 255.f
+                            blue:(hex & 0xFF) / 255.f
+                           alpha:1.f];
+}
+
+static NSString* const OnScreenControlsThemeKey = @"onscreenControlsTheme";
+
+@implementation OnScreenControlsTheme
+
+- (instancetype)initWithIdentifier:(NSString*)identifier name:(NSString*)name
+                              body:(UIColor*)body bodyGlyph:(UIColor*)bodyGlyph
+                               cap:(UIColor*)cap legends:(NSArray<UIColor*>*)legends
+                             stick:(UIColor*)stick
+                             guide:(UIColor*)guide guideGlyph:(UIColor*)guideGlyph {
+    self = [super init];
+    _identifier = identifier;
+    _name = name;
+    _bodyColor = body;
+    _bodyGlyphColor = bodyGlyph;
+    _capColor = cap;
+    _legendColors = legends;
+    _stickColor = stick;
+    _guideColor = guide;
+    _guideGlyphColor = guideGlyph;
+    return self;
+}
+
++ (NSArray<OnScreenControlsTheme*>*) themes {
+    static NSArray<OnScreenControlsTheme*>* themes;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        // Colors are sampled from Xbox Wireless Controller product photos. Every
+        // colorway pairs its shell with glossy black face buttons and D-pad.
+        UIColor* cap = ColorFromHex(0x141414);
+        UIColor* white = ColorFromHex(0xF5F7FC);
+        UIColor* dark = ColorFromHex(0x1E1E1E);
+        NSArray* xboxLegends = @[ColorFromHex(0x68C44A), ColorFromHex(0xE0282B), ColorFromHex(0x07B0F6), ColorFromHex(0xF5E10A)];
+        // Colored shells use tonal legends, lightened here to stay legible on black caps.
+        NSArray* (^tonal)(uint32_t) = ^(uint32_t hex) {
+            UIColor* color = ColorFromHex(hex);
+            return @[color, color, color, color];
+        };
+        themes = @[
+            [[self alloc] initWithIdentifier:@"glass" name:@"Glass"
+                                        body:nil bodyGlyph:UIColor.whiteColor
+                                         cap:nil legends:@[UIColor.whiteColor, UIColor.whiteColor, UIColor.whiteColor, UIColor.whiteColor]
+                                       stick:[UIColor colorWithWhite:1 alpha:.9]
+                                       guide:nil guideGlyph:UIColor.whiteColor],
+            [[self alloc] initWithIdentifier:@"graphite" name:@"Graphite"
+                                        body:ColorFromHex(0x434343) bodyGlyph:ColorFromHex(0xC8C8C8)
+                                         cap:cap legends:xboxLegends
+                                       stick:ColorFromHex(0x2A2A2A)
+                                       guide:white guideGlyph:ColorFromHex(0x434343)],
+            [[self alloc] initWithIdentifier:@"arctic" name:@"Arctic"
+                                        body:white bodyGlyph:ColorFromHex(0x6E7179)
+                                         cap:cap legends:xboxLegends
+                                       stick:dark
+                                       guide:ColorFromHex(0x1A1B23) guideGlyph:UIColor.whiteColor],
+            [[self alloc] initWithIdentifier:@"cobalt" name:@"Cobalt"
+                                        body:ColorFromHex(0x2A5299) bodyGlyph:UIColor.whiteColor
+                                         cap:cap legends:tonal(0x5A8FE6)
+                                       stick:ColorFromHex(0x2A55A0)
+                                       guide:white guideGlyph:ColorFromHex(0x2A5299)],
+            [[self alloc] initWithIdentifier:@"crimson" name:@"Crimson"
+                                        body:ColorFromHex(0xD11A14) bodyGlyph:UIColor.whiteColor
+                                         cap:cap legends:tonal(0xF6454D)
+                                       stick:ColorFromHex(0xD02A2B)
+                                       guide:white guideGlyph:ColorFromHex(0xD11A14)],
+            [[self alloc] initWithIdentifier:@"neonLime" name:@"Neon Lime"
+                                        body:ColorFromHex(0xC5E20A) bodyGlyph:dark
+                                         cap:cap legends:tonal(0xD6F04F)
+                                       stick:ColorFromHex(0xC4E000)
+                                       guide:white guideGlyph:ColorFromHex(0x7E9400)],
+            [[self alloc] initWithIdentifier:@"fuchsia" name:@"Fuchsia"
+                                        body:ColorFromHex(0xD84C7B) bodyGlyph:UIColor.whiteColor
+                                         cap:cap legends:tonal(0xF06A98)
+                                       stick:ColorFromHex(0xD74A78)
+                                       guide:white guideGlyph:ColorFromHex(0xD84C7B)],
+            [[self alloc] initWithIdentifier:@"emerald" name:@"Emerald"
+                                        body:ColorFromHex(0x4FC858) bodyGlyph:dark
+                                         cap:cap legends:tonal(0x3FD86A)
+                                       stick:ColorFromHex(0x51CB58)
+                                       guide:white guideGlyph:ColorFromHex(0x2E9A38)],
+            [[self alloc] initWithIdentifier:@"amethyst" name:@"Amethyst"
+                                        body:ColorFromHex(0x563E6A) bodyGlyph:UIColor.whiteColor
+                                         cap:cap legends:tonal(0x9B7BC0)
+                                       stick:ColorFromHex(0x563F6A)
+                                       guide:white guideGlyph:ColorFromHex(0x563E6A)],
+        ];
+    });
+    return themes;
+}
+
++ (OnScreenControlsTheme*) savedTheme {
+    NSString* identifier = [[NSUserDefaults standardUserDefaults] stringForKey:OnScreenControlsThemeKey];
+    for (OnScreenControlsTheme* theme in [self themes]) {
+        if ([theme.identifier isEqualToString:identifier]) {
+            return theme;
+        }
+    }
+    return [self themes].firstObject;
+}
+
++ (void) saveTheme:(OnScreenControlsTheme*)theme {
+    [[NSUserDefaults standardUserDefaults] setObject:theme.identifier forKey:OnScreenControlsThemeKey];
+}
+
+@end
+
+@interface GamepadButton : UIButton
+@property(nonatomic, weak) UIView* streamInputView;
+@property(nonatomic, copy) NSString* legendTitle;
+@property(nonatomic, copy) NSString* legendSymbol;
+@property(nonatomic) UIColor* legendTint;
+@property(nonatomic) UIColor* legendColor;
+@property(nonatomic) BOOL isTrigger;
+@property(nonatomic) CGSize styledSize;
+@end
+
+@implementation GamepadButton
+- (void)touchesBegan:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
+    [super touchesBegan:touches withEvent:event];
+    [self.streamInputView touchesBegan:touches withEvent:event];
+}
+
+- (void)touchesMoved:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
+    [super touchesMoved:touches withEvent:event];
+    [self.streamInputView touchesMoved:touches withEvent:event];
+}
+
+- (void)touchesEnded:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
+    [super touchesEnded:touches withEvent:event];
+    [self.streamInputView touchesEnded:touches withEvent:event];
+}
+
+- (void)touchesCancelled:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
+    [super touchesCancelled:touches withEvent:event];
+    [self.streamInputView touchesCancelled:touches withEvent:event];
+}
+@end
+
+@interface GamepadDirectionGroup : UIVisualEffectView
+@end
+
+@implementation GamepadDirectionGroup
+- (UIView*)hitTest:(CGPoint)point withEvent:(UIEvent*)event {
+    UIView* hit = [super hitTest:point withEvent:event];
+    for (UIView* ancestor = hit; ancestor != nil && ancestor != self; ancestor = ancestor.superview) {
+        if ([ancestor isKindOfClass:GamepadButton.class]) {
+            return hit;
+        }
+    }
+    return nil;
+}
+@end
+
+static const NSInteger StickWellTag = 1;
+static const NSInteger StickCapTag = 2;
+
 @implementation OnScreenControls {
+    OnScreenControlsTheme* _theme;
+    NSMapTable<CALayer*, UIView*>* _controlViews;
+    GamepadDirectionGroup* _directionGroup;
+    UIView* _dpadVerticalBar;
+    UIView* _dpadHorizontalBar;
     CALayer* _aButton;
     CALayer* _bButton;
     CALayer* _xButton;
@@ -30,42 +196,45 @@
     CALayer* _rightStick;
     CALayer* _startButton;
     CALayer* _selectButton;
+    CALayer* _guideButton;
     CALayer* _r1Button;
     CALayer* _r2Button;
     CALayer* _r3Button;
     CALayer* _l1Button;
     CALayer* _l2Button;
     CALayer* _l3Button;
-    
+
     UITouch* _aTouch;
     UITouch* _bTouch;
     UITouch* _xTouch;
     UITouch* _yTouch;
     UITouch* _dpadTouch;
+    int _dpadFlags;
     UITouch* _lsTouch;
     UITouch* _rsTouch;
     UITouch* _startTouch;
     UITouch* _selectTouch;
+    UITouch* _guideTouch;
     UITouch* _r1Touch;
     UITouch* _r2Touch;
     UITouch* _r3Touch;
     UITouch* _l1Touch;
     UITouch* _l2Touch;
     UITouch* _l3Touch;
-    
+
     NSDate* l3TouchStart;
     NSDate* r3TouchStart;
-    
+
     BOOL l3Set;
     BOOL r3Set;
-    
+
     BOOL _largeLayout;
     CGRect _separateControlArea;
     CGRect _controlArea;
     UIView* _view;
     OnScreenControlsLevel _level;
     BOOL _visible;
-    
+
     ControllerSupport *_controllerSupport;
     Controller *_controller;
     NSMutableArray* _deadTouches;
@@ -74,21 +243,57 @@
 
 static const float EDGE_WIDTH = .05;
 
-//static const float BUTTON_SIZE = 50;
-static const float BUTTON_DIST = 20;
+// Control sizes for each layout. The compact sizes suit a phone, and the deck sizes suit the
+// lower panel of a foldable, where the controls sit under the thumbs.
+typedef struct {
+    float faceButton;
+    // From the center of the face buttons to the inner edge of each button
+    float buttonDist;
+    float dpadArmWidth;
+    float dpadReach;
+    CGSize bumper;
+    CGSize trigger;
+    float systemButton;
+    float guideButton;
+    float stickButton;
+    float stickInner;
+    float stickOuter;
+} ControlSizes;
+
+static const ControlSizes COMPACT_SIZES = {44, 20, 40, 58, {64, 32}, {64, 44}, 36, 44, 56, 48, 88};
+// Laid out for a deck of DECK_REFERENCE_SIZE and scaled to the actual deck
+static const ControlSizes DECK_SIZES = {58, 25, 54, 80, {92, 40}, {92, 50}, 42, 50, 60, 62, 124};
+static const CGSize DECK_REFERENCE_SIZE = {669, 430};
+static ControlSizes gSizes = COMPACT_SIZES;
+
+#define FACE_BUTTON_SIZE gSizes.faceButton
+#define BUTTON_DIST gSizes.buttonDist
+#define D_PAD_ARM_WIDTH gSizes.dpadArmWidth
+#define D_PAD_REACH gSizes.dpadReach
+#define BUMPER_SIZE gSizes.bumper
+#define TRIGGER_SIZE gSizes.trigger
+#define SYSTEM_BUTTON_SIZE gSizes.systemButton
+#define GUIDE_BUTTON_SIZE gSizes.guideButton
+#define STICK_BUTTON_SIZE gSizes.stickButton
+#define STICK_INNER_SIZE gSizes.stickInner
+#define STICK_OUTER_SIZE gSizes.stickOuter
+
+// Extra room around controls for touches that land just outside them, and for fingers
+// sliding between face buttons or around the D-pad
+static const float TOUCH_SLACK = 12;
+static const float SLIDE_SLACK = 32;
+
 static float BUTTON_CENTER_X;
 static float BUTTON_CENTER_Y;
 
-static const float D_PAD_DIST = 10;
 static float D_PAD_CENTER_X;
 static float D_PAD_CENTER_Y;
+
 
 static const float DEAD_ZONE_PADDING = 15;
 
 static const double STICK_CLICK_RATE = 100;
 static const float STICK_DEAD_ZONE = .1;
-static float STICK_INNER_SIZE;
-static float STICK_OUTER_SIZE;
 static float LS_CENTER_X;
 static float LS_CENTER_Y;
 static float RS_CENTER_X;
@@ -120,29 +325,347 @@ static float L3_Y;
     _controller = [controllerSupport getOscController];
     _deadTouches = [[NSMutableArray alloc] init];
     _swapABXY = streamConfig.swapABXYButtons;
-    
-    _aButton = [CALayer layer];
-    _bButton = [CALayer layer];
-    _xButton = [CALayer layer];
-    _yButton = [CALayer layer];
-    _upButton = [CALayer layer];
-    _downButton = [CALayer layer];
-    _leftButton = [CALayer layer];
-    _rightButton = [CALayer layer];
-    _l1Button = [CALayer layer];
-    _r1Button = [CALayer layer];
-    _l2Button = [CALayer layer];
-    _r2Button = [CALayer layer];
-    _l3Button = [CALayer layer];
-    _r3Button = [CALayer layer];
-    _startButton = [CALayer layer];
-    _selectButton = [CALayer layer];
-    _leftStickBackground = [CALayer layer];
-    _rightStickBackground = [CALayer layer];
-    _leftStick = [CALayer layer];
-    _rightStick = [CALayer layer];
-    
+    _theme = [OnScreenControlsTheme savedTheme];
+
+    _controlViews = [NSMapTable strongToStrongObjectsMapTable];
+    if (@available(iOS 26.0, tvOS 26.0, *)) {
+        UIGlassContainerEffect* effect = [[UIGlassContainerEffect alloc] init];
+        effect.spacing = 16;
+        _directionGroup = [[GamepadDirectionGroup alloc] initWithEffect:effect];
+    }
+    // Two overlapping bars merge into a single cross behind the D-pad arms
+    _dpadVerticalBar = [self glassViewWithTint:_theme.capColor cornerRadius:8];
+    _dpadHorizontalBar = [self glassViewWithTint:_theme.capColor cornerRadius:8];
+
+    NSArray<UIColor*>* legends = _theme.legendColors;
+    _aButton = [self buttonWithTitle:@"A" symbol:nil label:nil size:CGSizeMake(FACE_BUTTON_SIZE, FACE_BUTTON_SIZE) tint:_theme.capColor glyph:legends[0]];
+    _bButton = [self buttonWithTitle:@"B" symbol:nil label:nil size:CGSizeMake(FACE_BUTTON_SIZE, FACE_BUTTON_SIZE) tint:_theme.capColor glyph:legends[1]];
+    _xButton = [self buttonWithTitle:@"X" symbol:nil label:nil size:CGSizeMake(FACE_BUTTON_SIZE, FACE_BUTTON_SIZE) tint:_theme.capColor glyph:legends[2]];
+    _yButton = [self buttonWithTitle:@"Y" symbol:nil label:nil size:CGSizeMake(FACE_BUTTON_SIZE, FACE_BUTTON_SIZE) tint:_theme.capColor glyph:legends[3]];
+
+    // The D-pad arms share the face button tint, as on the controller
+    UIColor* dpadGlyph = _theme.capColor != nil ? [UIColor colorWithWhite:1 alpha:.55] : [UIColor colorWithWhite:1 alpha:.7];
+    CGSize armSize = CGSizeMake(D_PAD_ARM_WIDTH, D_PAD_ARM_WIDTH);
+    _upButton = [self buttonWithTitle:nil symbol:@"arrowtriangle.up.fill" label:@"Up" size:armSize tint:_theme.capColor glyph:dpadGlyph];
+    _downButton = [self buttonWithTitle:nil symbol:@"arrowtriangle.down.fill" label:@"Down" size:armSize tint:_theme.capColor glyph:dpadGlyph];
+    _leftButton = [self buttonWithTitle:nil symbol:@"arrowtriangle.left.fill" label:@"Left" size:armSize tint:_theme.capColor glyph:dpadGlyph];
+    _rightButton = [self buttonWithTitle:nil symbol:@"arrowtriangle.right.fill" label:@"Right" size:armSize tint:_theme.capColor glyph:dpadGlyph];
+
+    UIColor* body = _theme.bodyColor;
+    UIColor* bodyGlyph = _theme.bodyGlyphColor;
+    _l1Button = [self buttonWithTitle:@"LB" symbol:nil label:nil size:BUMPER_SIZE tint:body glyph:bodyGlyph];
+    _r1Button = [self buttonWithTitle:@"RB" symbol:nil label:nil size:BUMPER_SIZE tint:body glyph:bodyGlyph];
+    _l2Button = [self buttonWithTitle:@"LT" symbol:nil label:nil size:TRIGGER_SIZE tint:body glyph:bodyGlyph];
+    _r2Button = [self buttonWithTitle:@"RT" symbol:nil label:nil size:TRIGGER_SIZE tint:body glyph:bodyGlyph];
+    _l3Button = [self buttonWithTitle:@"LS" symbol:nil label:nil size:CGSizeMake(STICK_BUTTON_SIZE, STICK_BUTTON_SIZE) tint:body glyph:bodyGlyph];
+    _r3Button = [self buttonWithTitle:@"RS" symbol:nil label:nil size:CGSizeMake(STICK_BUTTON_SIZE, STICK_BUTTON_SIZE) tint:body glyph:bodyGlyph];
+    _l3Button.borderColor = _r3Button.borderColor = legends[0].CGColor;
+    _startButton = [self buttonWithTitle:nil symbol:@"line.3.horizontal" label:@"Menu" size:CGSizeMake(SYSTEM_BUTTON_SIZE, SYSTEM_BUTTON_SIZE) tint:body glyph:bodyGlyph];
+    _selectButton = [self buttonWithTitle:nil symbol:@"square.on.square" label:@"View" size:CGSizeMake(SYSTEM_BUTTON_SIZE, SYSTEM_BUTTON_SIZE) tint:body glyph:bodyGlyph];
+    _guideButton = [self buttonWithTitle:nil symbol:@"xbox.logo" label:@"Xbox" size:CGSizeMake(GUIDE_BUTTON_SIZE, GUIDE_BUTTON_SIZE) tint:_theme.guideColor glyph:_theme.guideGlyphColor];
+
+    _leftStickBackground = [self stickWell];
+    _rightStickBackground = [self stickWell];
+    _leftStick = [self stickCap];
+    _rightStick = [self stickCap];
+
     return self;
+}
+
+- (CALayer*)buttonWithTitle:(NSString*)title symbol:(NSString*)symbol label:(NSString*)label size:(CGSize)size tint:(UIColor*)tint glyph:(UIColor*)glyph {
+    GamepadButton* button = [[GamepadButton alloc] initWithFrame:CGRectMake(0, 0, size.width, size.height)];
+    button.legendTitle = title;
+    button.legendSymbol = symbol;
+    button.legendTint = tint;
+    button.legendColor = glyph;
+    button.isTrigger = CGSizeEqualToSize(size, TRIGGER_SIZE);
+    button.streamInputView = _view;
+    button.accessibilityLabel = label ?: title;
+    if ([symbol hasPrefix:@"arrowtriangle"]) {
+        button.configurationUpdateHandler = ^(UIButton* button) {
+            UIButtonConfiguration* configuration = button.configuration;
+            configuration.background.backgroundColor = button.highlighted ? [UIColor colorWithWhite:1 alpha:.2] : UIColor.clearColor;
+            button.configuration = configuration;
+        };
+    }
+#if !TARGET_OS_TV
+    button.multipleTouchEnabled = YES;
+    button.exclusiveTouch = NO;
+#endif
+    [self styleButton:button size:size];
+    [_controlViews setObject:button forKey:button.layer];
+    return button.layer;
+}
+
+- (void)styleButton:(GamepadButton*)button size:(CGSize)size {
+    NSString* title = button.legendTitle;
+    NSString* symbol = button.legendSymbol;
+    UIColor* tint = button.legendTint;
+    UIColor* glyph = button.legendColor;
+    BOOL isDirection = [symbol hasPrefix:@"arrowtriangle"];
+    UIButtonConfiguration* configuration;
+    if (isDirection) {
+        // The D-pad cross provides the background
+        configuration = [UIButtonConfiguration plainButtonConfiguration];
+    }
+    else if (@available(iOS 26.0, tvOS 26.0, *)) {
+        configuration = tint != nil ? [UIButtonConfiguration prominentGlassButtonConfiguration] : [UIButtonConfiguration clearGlassButtonConfiguration];
+    }
+    else {
+        configuration = [UIButtonConfiguration filledButtonConfiguration];
+        tint = tint ?: [UIColor colorWithWhite:0 alpha:.35];
+    }
+    configuration.baseBackgroundColor = tint;
+    configuration.baseForegroundColor = glyph;
+    configuration.contentInsets = NSDirectionalEdgeInsetsZero;
+    
+    // Prominent glass restyles titles and template images for contrast, which washes out
+    // dark legends on light tints, so every legend is drawn as an image in its own color.
+    CGFloat shortSide = MIN(size.width, size.height);
+    if (title != nil) {
+        UIFontDescriptor* descriptor = [[UIFont systemFontOfSize:shortSide * .42 weight:UIFontWeightBold].fontDescriptor
+                                        fontDescriptorWithDesign:UIFontDescriptorSystemDesignRounded];
+        NSDictionary* attributes = @{
+            NSFontAttributeName: [UIFont fontWithDescriptor:descriptor size:0],
+            NSForegroundColorAttributeName: glyph
+        };
+        CGSize titleSize = [title sizeWithAttributes:attributes];
+        UIGraphicsImageRenderer* renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(ceil(titleSize.width), ceil(titleSize.height))];
+        configuration.image = [[renderer imageWithActions:^(UIGraphicsImageRendererContext* context) {
+            [title drawAtPoint:CGPointZero withAttributes:attributes];
+        }] imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
+    }
+    else {
+        UIImage* image = [UIImage systemImageNamed:symbol];
+        if (image == nil && [symbol isEqualToString:@"xbox.logo"]) {
+            image = [UIImage systemImageNamed:@"logo.xbox"];
+        }
+        CGFloat pointSize = isDirection ? shortSide * .27 : shortSide * .4;
+        image = [image imageByApplyingSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:pointSize weight:UIImageSymbolWeightSemibold]];
+        configuration.image = [image imageWithTintColor:glyph renderingMode:UIImageRenderingModeAlwaysOriginal];
+    }
+    
+    // Triggers and D-pad arms keep their corners, everything else is round
+    if (button.isTrigger) {
+        configuration.cornerStyle = UIButtonConfigurationCornerStyleFixed;
+        configuration.background.cornerRadius = shortSide * .36;
+    }
+    else if (isDirection) {
+        configuration.cornerStyle = UIButtonConfigurationCornerStyleFixed;
+        configuration.background.cornerRadius = shortSide * .2;
+    }
+    else {
+        configuration.cornerStyle = UIButtonConfigurationCornerStyleCapsule;
+    }
+    button.configuration = configuration;
+    button.layer.cornerRadius = shortSide / 2;
+    button.styledSize = size;
+}
+
+- (UIView*)glassViewWithTint:(UIColor*)tint cornerRadius:(CGFloat)cornerRadius {
+    UIVisualEffectView* view;
+    if (@available(iOS 26.0, tvOS 26.0, *)) {
+        // Tinted glass matches the prominent glass buttons, untinted glass stays clear
+        UIGlassEffect* effect = [UIGlassEffect effectWithStyle:tint != nil ? UIGlassEffectStyleRegular : UIGlassEffectStyleClear];
+        effect.tintColor = tint;
+        view = [[UIVisualEffectView alloc] initWithEffect:effect];
+        view.cornerConfiguration = [UICornerConfiguration configurationWithUniformRadius:[UICornerRadius fixedRadius:cornerRadius]];
+    }
+    else {
+        view = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleDark]];
+        view.contentView.backgroundColor = tint;
+        view.layer.cornerRadius = cornerRadius;
+        view.clipsToBounds = YES;
+    }
+    // Touches pass through to the stream view, which tracks them for the controls
+    view.userInteractionEnabled = NO;
+    return view;
+}
+
+- (CALayer*)stickWell {
+    UIView* well = [self glassViewWithTint:_theme.bodyColor cornerRadius:STICK_OUTER_SIZE / 2];
+    well.tag = StickWellTag;
+    [_controlViews setObject:well forKey:well.layer];
+    return well.layer;
+}
+
+- (CALayer*)stickCap {
+    UIView* cap = [[UIView alloc] initWithFrame:CGRectMake(0, 0, STICK_INNER_SIZE, STICK_INNER_SIZE)];
+    cap.tag = StickCapTag;
+    cap.userInteractionEnabled = NO;
+    cap.backgroundColor = _theme.stickColor;
+    cap.layer.cornerRadius = STICK_INNER_SIZE / 2;
+    cap.layer.shadowColor = UIColor.blackColor.CGColor;
+    cap.layer.shadowOpacity = .35;
+    cap.layer.shadowRadius = 6;
+    cap.layer.shadowOffset = CGSizeMake(0, 2);
+    cap.layer.shadowPath = [UIBezierPath bezierPathWithOvalInRect:cap.bounds].CGPath;
+
+    // Ring around the concave thumb rest
+    CGFloat brightness = 0;
+    [_theme.stickColor getHue:nil saturation:nil brightness:&brightness alpha:nil];
+    CALayer* rest = [CALayer layer];
+    rest.frame = CGRectInset(cap.bounds, 8, 8);
+    rest.cornerRadius = rest.bounds.size.width / 2;
+    rest.borderWidth = 1.5;
+    rest.borderColor = (brightness > .8 ? [UIColor colorWithWhite:0 alpha:.14] : [UIColor colorWithWhite:1 alpha:.2]).CGColor;
+    [cap.layer addSublayer:rest];
+
+    [_controlViews setObject:cap forKey:cap.layer];
+    return cap.layer;
+}
+
+- (void)showButton:(CALayer*)layer frame:(CGRect)frame {
+    UIView* view = [_controlViews objectForKey:layer];
+    view.frame = frame;
+    [self resizeControl:view];
+    BOOL isDirection = layer == _upButton || layer == _downButton || layer == _leftButton || layer == _rightButton;
+    if (isDirection && _directionGroup != nil) {
+        // Preserve the stream coordinate space for the existing input handling.
+        _directionGroup.frame = _view.bounds;
+        [_view addSubview:_directionGroup];
+        [_directionGroup.contentView addSubview:view];
+    }
+    else {
+        [_view addSubview:view];
+    }
+}
+
+- (void)resizeControl:(UIView*)view {
+    CGSize size = view.bounds.size;
+    if ([view isKindOfClass:GamepadButton.class]) {
+        GamepadButton* button = (GamepadButton*)view;
+        if (!CGSizeEqualToSize(button.styledSize, size)) {
+            [self styleButton:button size:size];
+        }
+    }
+    else if (view.tag == StickWellTag) {
+        if (@available(iOS 26.0, tvOS 26.0, *)) {
+            view.cornerConfiguration = [UICornerConfiguration configurationWithUniformRadius:[UICornerRadius fixedRadius:size.width / 2]];
+        }
+        else {
+            view.layer.cornerRadius = size.width / 2;
+        }
+    }
+    else if (view.tag == StickCapTag && view.layer.cornerRadius != size.width / 2) {
+        view.layer.cornerRadius = size.width / 2;
+        view.layer.shadowPath = [UIBezierPath bezierPathWithOvalInRect:view.bounds].CGPath;
+        CALayer* rest = view.layer.sublayers.firstObject;
+        rest.frame = CGRectInset(view.bounds, size.width / 6, size.width / 6);
+        rest.cornerRadius = rest.bounds.size.width / 2;
+    }
+}
+
+- (BOOL)button:(CALayer*)layer containsPoint:(CGPoint)point {
+    UIView* button = [_controlViews objectForKey:layer];
+    CGPoint localPoint = [button convertPoint:point fromView:_view];
+    return button.superview != nil && [button pointInside:localPoint withEvent:nil];
+}
+
+- (void)hideButton:(CALayer*)layer {
+    [[_controlViews objectForKey:layer] removeFromSuperview];
+}
+
+// The face button nearest the point, or -1 when the point is farther than slack outside the cluster.
+// Indexes follow A, B, X, Y.
+- (int)faceButtonAt:(CGPoint)point slack:(CGFloat)slack {
+    if (_aButton.superlayer == nil) {
+        return -1;
+    }
+    CGFloat faceOffset = BUTTON_DIST + FACE_BUTTON_SIZE / 2;
+    if (hypot(point.x - BUTTON_CENTER_X, point.y - BUTTON_CENTER_Y) > faceOffset + FACE_BUTTON_SIZE / 2 + slack) {
+        return -1;
+    }
+    NSArray<CALayer*>* buttons = @[_aButton, _bButton, _xButton, _yButton];
+    int nearest = -1;
+    CGFloat nearestDistance = CGFLOAT_MAX;
+    for (int i = 0; i < 4; i++) {
+        CGRect frame = [_controlViews objectForKey:buttons[i]].frame;
+        CGFloat distance = hypot(point.x - CGRectGetMidX(frame), point.y - CGRectGetMidY(frame));
+        if (distance < nearestDistance) {
+            nearest = i;
+            nearestDistance = distance;
+        }
+    }
+    return nearest;
+}
+
+- (UITouch* __strong *)faceTouchAtIndex:(int)index {
+    switch (index) {
+        case 0: return &_aTouch;
+        case 1: return &_bTouch;
+        case 2: return &_xTouch;
+        default: return &_yTouch;
+    }
+}
+
+static const int FACE_FLAGS[] = {A_FLAG, B_FLAG, X_FLAG, Y_FLAG};
+
+- (void)highlightFaceButtons {
+    NSArray<CALayer*>* buttons = @[_aButton, _bButton, _xButton, _yButton];
+    for (int i = 0; i < 4; i++) {
+        ((UIButton*)[_controlViews objectForKey:buttons[i]]).highlighted = *[self faceTouchAtIndex:i] != nil;
+    }
+}
+
+// The D-pad directions for a point, including diagonals between neighboring arms. Returns -1
+// when the point is farther than slack outside the D-pad, and no directions near its center.
+- (int)dpadFlagsAt:(CGPoint)point slack:(CGFloat)slack {
+    if (_upButton.superlayer == nil) {
+        return -1;
+    }
+    CGFloat dx = point.x - D_PAD_CENTER_X;
+    CGFloat dy = point.y - D_PAD_CENTER_Y;
+    CGFloat distance = hypot(dx, dy);
+    if (distance > D_PAD_REACH + slack) {
+        return -1;
+    }
+    if (distance < D_PAD_ARM_WIDTH / 4) {
+        return 0;
+    }
+    // Each arm owns 60 degrees around its axis, and the 30 degrees between arms press both
+    CGFloat degrees = atan2(-dy, dx) * 180 / M_PI;
+    int flags = 0;
+    if (fabs(degrees) < 60) flags |= RIGHT_FLAG;
+    if (fabs(degrees) > 120) flags |= LEFT_FLAG;
+    if (degrees > 30 && degrees < 150) flags |= UP_FLAG;
+    if (degrees < -30 && degrees > -150) flags |= DOWN_FLAG;
+    return flags;
+}
+
+- (void)highlightDirections:(int)flags {
+    ((UIButton*)[_controlViews objectForKey:_upButton]).highlighted = (flags & UP_FLAG) != 0;
+    ((UIButton*)[_controlViews objectForKey:_downButton]).highlighted = (flags & DOWN_FLAG) != 0;
+    ((UIButton*)[_controlViews objectForKey:_leftButton]).highlighted = (flags & LEFT_FLAG) != 0;
+    ((UIButton*)[_controlViews objectForKey:_rightButton]).highlighted = (flags & RIGHT_FLAG) != 0;
+}
+
+// The stick under a point, including the whole well and a margin around it
+- (BOOL)stickAtCenter:(CGPoint)center containsPoint:(CGPoint)point layer:(CALayer*)layer {
+    return layer.superlayer != nil && hypot(point.x - center.x, point.y - center.y) <= STICK_OUTER_SIZE / 2 + TOUCH_SLACK;
+}
+
+- (void)dealloc {
+    [_directionGroup removeFromSuperview];
+    [_dpadVerticalBar removeFromSuperview];
+    [_dpadHorizontalBar removeFromSuperview];
+    for (UIView* view in _controlViews.objectEnumerator) {
+        [view removeFromSuperview];
+    }
+}
+
+static CGFloat DeckScale(CGSize deck) {
+    return MAX(.5, MIN(deck.width / DECK_REFERENCE_SIZE.width, deck.height / DECK_REFERENCE_SIZE.height));
+}
+
+static ControlSizes ScaledSizes(ControlSizes sizes, CGFloat scale) {
+    return (ControlSizes){
+        sizes.faceButton * scale, sizes.buttonDist * scale, sizes.dpadArmWidth * scale, sizes.dpadReach * scale,
+        CGSizeMake(sizes.bumper.width * scale, sizes.bumper.height * scale),
+        CGSizeMake(sizes.trigger.width * scale, sizes.trigger.height * scale),
+        sizes.systemButton * scale, sizes.guideButton * scale, sizes.stickButton * scale,
+        sizes.stickInner * scale, sizes.stickOuter * scale,
+    };
 }
 
 - (void) layoutControls {
@@ -150,34 +673,41 @@ static float L3_Y;
     BOOL largeLayout = MIN(controlArea.size.width, controlArea.size.height) >= 600;
     _separateControlArea = CGRectZero;
     if ([(StreamView*)_view usesSeparateControlArea]) {
-        // Leave clearance around the hinge and keep the entire control artwork below it.
+        // Touches anywhere below the hinge belong to the controls, which sit on the deck that
+        // mirrors the video
         CGFloat top = MAX(CGRectGetMinY(controlArea), CGRectGetMidY(_view.bounds) + 16);
-        controlArea = CGRectMake(controlArea.origin.x, top, controlArea.size.width, MAX(0, CGRectGetMaxY(controlArea) - top));
-        _separateControlArea = controlArea;
-        CGFloat height = controlArea.size.height;
-        CGFloat padding = MAX(0, ([UIImage imageNamed:@"L2"].size.height / 2 - height * .1) / .8);
-        CGFloat stickReach = ([UIImage imageNamed:@"StickOuter"].size.height + [UIImage imageNamed:@"StickInner"].size.height) / 2;
-        padding = MAX(padding, (stickReach - height * .2) / .6);
-        CGFloat buttonReach = MAX([UIImage imageNamed:@"AButton"].size.height / 2 + BUTTON_DIST,
-                                 [UIImage imageNamed:@"DownButton"].size.height + D_PAD_DIST);
-        padding = MAX(padding, (buttonReach - height * .25) / .5);
-        padding = MAX(padding, ([UIImage imageNamed:@"StartButton"].size.height / 2 - height * .05) / .9);
-        controlArea = CGRectInset(controlArea, 0, MIN(padding, controlArea.size.height / 2));
+        _separateControlArea = CGRectMake(controlArea.origin.x, top, controlArea.size.width, MAX(0, CGRectGetMaxY(controlArea) - top));
+        // The deck may extend under the home indicator, but the controls stay clear of it
+        controlArea = CGRectIntersection([(StreamView*)_view controlDeckRect], _separateControlArea);
+        if (CGRectIsNull(controlArea)) {
+            controlArea = _separateControlArea;
+        }
     }
     else if (largeLayout) {
         // Keep controls reachable near the lower edge of a large window.
         controlArea.origin.y += controlArea.size.height / 2;
         controlArea.size.height /= 2;
     }
-    controlArea = CGRectInset(controlArea, controlArea.size.width * EDGE_WIDTH, 0);
+    if (CGRectIsEmpty(_separateControlArea) && CGRectGetWidth(_view.bounds) > CGRectGetHeight(_view.bounds)) {
+        CGFloat horizontalInset = MAX(_view.safeAreaInsets.left, _view.safeAreaInsets.right);
+        controlArea.origin.x = CGRectGetMinX(_view.bounds) + horizontalInset;
+        controlArea.size.width = MAX(0, CGRectGetWidth(_view.bounds) - horizontalInset * 2);
+        CGFloat height = MIN(controlArea.size.height, 360);
+        controlArea.origin.y = CGRectGetMaxY(controlArea) - height;
+        controlArea.size.height = height;
+    }
+    if (CGRectIsEmpty(_separateControlArea)) {
+        controlArea = CGRectInset(controlArea, controlArea.size.width * EDGE_WIDTH, 0);
+    }
     if (CGRectEqualToRect(controlArea, _controlArea) && largeLayout == _largeLayout) {
         return;
     }
+    gSizes = CGRectIsEmpty(_separateControlArea) ? COMPACT_SIZES : ScaledSizes(DECK_SIZES, DeckScale(controlArea.size));
 
     // Release held controls before moving their hit targets underneath active touches.
     NSMutableSet* touches = [NSMutableSet setWithArray:_deadTouches];
     UITouch* heldTouches[] = {_aTouch, _bTouch, _xTouch, _yTouch, _dpadTouch, _lsTouch, _rsTouch,
-                             _startTouch, _selectTouch, _r1Touch, _r2Touch, _r3Touch,
+                             _startTouch, _selectTouch, _guideTouch, _r1Touch, _r2Touch, _r3Touch,
                              _l1Touch, _l2Touch, _l3Touch};
     for (int i = 0; i < sizeof(heldTouches) / sizeof(*heldTouches); i++) {
         if (heldTouches[i] != nil) {
@@ -291,6 +821,10 @@ static float L3_Y;
 - (void) setupExtendedGamepadControls {
     // Start with the default complex layout
     [self setupComplexControls];
+    if (!CGRectIsEmpty(_separateControlArea)) {
+        // The deck layout already has a place for every control
+        return;
+    }
     
     START_X = _controlArea.size.width * .95 + _controlArea.origin.x;
     START_Y = _controlArea.size.height * .9 + _controlArea.origin.y;
@@ -315,6 +849,10 @@ static float L3_Y;
 - (void) setupGamepadControls {
     // Start with the default complex layout
     [self setupComplexControls];
+    if (!CGRectIsEmpty(_separateControlArea)) {
+        // The deck layout already has a place for every control
+        return;
+    }
     
     L2_Y = _controlArea.size.height * .75 + _controlArea.origin.y;
     L2_X = _controlArea.size.width * .05 + _controlArea.origin.x;
@@ -338,6 +876,10 @@ static float L3_Y;
 - (void) setupSimpleControls {
     // Start with the default complex layout
     [self setupComplexControls];
+    if (!CGRectIsEmpty(_separateControlArea)) {
+        // The deck layout already has a place for every control
+        return;
+    }
     
     START_Y = _controlArea.size.height * .9 + _controlArea.origin.y;
     SELECT_Y = _controlArea.size.height * .9 + _controlArea.origin.y;
@@ -363,8 +905,56 @@ static float L3_Y;
     }
 }
 
+// The deck under the thumbs follows the controller: the left stick and face buttons where the
+// thumbs rest, with the D-pad and right stick lower and further in, and the shoulder buttons
+// above them. Positions are for a deck of DECK_REFERENCE_SIZE, scaled to the actual deck.
+- (void) setupDeckControls
+{
+    CGFloat scale = DeckScale(_controlArea.size);
+    CGFloat originX = CGRectGetMidX(_controlArea) - DECK_REFERENCE_SIZE.width * scale / 2;
+    CGFloat originY = CGRectGetMidY(_controlArea) - DECK_REFERENCE_SIZE.height * scale / 2;
+#define DECK_X(x) (originX + (x) * scale)
+#define DECK_Y(y) (originY + (y) * scale)
+    LS_CENTER_X = DECK_X(112);
+    LS_CENTER_Y = DECK_Y(232);
+    BUTTON_CENTER_X = DECK_X(557);
+    BUTTON_CENTER_Y = DECK_Y(232);
+    D_PAD_CENTER_X = DECK_X(240);
+    D_PAD_CENTER_Y = DECK_Y(345);
+    RS_CENTER_X = DECK_X(429);
+    RS_CENTER_Y = DECK_Y(345);
+
+    L2_X = DECK_X(96);
+    L2_Y = DECK_Y(48);
+    L1_X = DECK_X(96);
+    L1_Y = DECK_Y(108);
+    R2_X = DECK_X(573);
+    R2_Y = DECK_Y(48);
+    R1_X = DECK_X(573);
+    R1_Y = DECK_Y(108);
+
+    // View, Xbox, and Menu sit in a row between the shoulder buttons
+    SELECT_X = DECK_X(270);
+    SELECT_Y = DECK_Y(60);
+    START_X = DECK_X(399);
+    START_Y = DECK_Y(60);
+
+    // Stick clicks replace the sticks when a controller provides them
+    L3_X = LS_CENTER_X;
+    L3_Y = LS_CENTER_Y;
+    R3_X = RS_CENTER_X;
+    R3_Y = RS_CENTER_Y;
+#undef DECK_X
+#undef DECK_Y
+}
+
 - (void) setupComplexControls
 {
+    if (!CGRectIsEmpty(_separateControlArea)) {
+        [self setupDeckControls];
+        return;
+    }
+
     D_PAD_CENTER_X = _controlArea.size.width * .1 + _controlArea.origin.x;
     D_PAD_CENTER_Y = _controlArea.size.height * .60 + _controlArea.origin.y;
     BUTTON_CENTER_X = _controlArea.size.width * .9 + _controlArea.origin.x;
@@ -409,213 +999,158 @@ static float L3_Y;
         R1_X = _controlArea.size.width * .9 + _controlArea.origin.x;
         R2_X = _controlArea.size.width * .9 + _controlArea.origin.x;
     }
+
+    // Keep the D-pad and face buttons inside narrow control areas
+    D_PAD_CENTER_X = MAX(D_PAD_CENTER_X, CGRectGetMinX(_controlArea) + D_PAD_REACH);
+    BUTTON_CENTER_X = MIN(BUTTON_CENTER_X, CGRectGetMaxX(_controlArea) - BUTTON_DIST - FACE_BUTTON_SIZE);
+}
+
+static CGRect CenteredRect(CGFloat x, CGFloat y, CGSize size) {
+    return CGRectMake(x - size.width / 2, y - size.height / 2, size.width, size.height);
 }
 
 - (void) drawButtons {
-    UIImage* aButtonImage = [UIImage imageNamed:@"AButton"];
-    UIImage* bButtonImage = [UIImage imageNamed:@"BButton"];
-    UIImage* xButtonImage = [UIImage imageNamed:@"XButton"];
-    UIImage* yButtonImage = [UIImage imageNamed:@"YButton"];
-    
-    CGRect aButtonFrame = CGRectMake(BUTTON_CENTER_X - aButtonImage.size.width / 2, BUTTON_CENTER_Y + BUTTON_DIST, aButtonImage.size.width, aButtonImage.size.height);
-    CGRect bButtonFrame = CGRectMake(BUTTON_CENTER_X + BUTTON_DIST, BUTTON_CENTER_Y - bButtonImage.size.height / 2, bButtonImage.size.width, bButtonImage.size.height);
-    CGRect xButtonFrame = CGRectMake(BUTTON_CENTER_X - BUTTON_DIST - xButtonImage.size.width, BUTTON_CENTER_Y - xButtonImage.size.height/ 2, xButtonImage.size.width, xButtonImage.size.height);
-    CGRect yButtonFrame = CGRectMake(BUTTON_CENTER_X - yButtonImage.size.width / 2, BUTTON_CENTER_Y - BUTTON_DIST - yButtonImage.size.height, yButtonImage.size.width, yButtonImage.size.height);
-    
+    CGSize faceSize = CGSizeMake(FACE_BUTTON_SIZE, FACE_BUTTON_SIZE);
+    CGFloat faceOffset = BUTTON_DIST + FACE_BUTTON_SIZE / 2;
+    CGRect aButtonFrame = CenteredRect(BUTTON_CENTER_X, BUTTON_CENTER_Y + faceOffset, faceSize);
+    CGRect bButtonFrame = CenteredRect(BUTTON_CENTER_X + faceOffset, BUTTON_CENTER_Y, faceSize);
+    CGRect xButtonFrame = CenteredRect(BUTTON_CENTER_X - faceOffset, BUTTON_CENTER_Y, faceSize);
+    CGRect yButtonFrame = CenteredRect(BUTTON_CENTER_X, BUTTON_CENTER_Y - faceOffset, faceSize);
+
     // create A button
-    _aButton.contents = (id) aButtonImage.CGImage;
-    _aButton.frame = _swapABXY ? bButtonFrame : aButtonFrame;
-    [_view.layer addSublayer:_aButton];
-    
+    [self showButton:_aButton frame:_swapABXY ? bButtonFrame : aButtonFrame];
+
     // create B button
-    _bButton.frame = _swapABXY ? aButtonFrame : bButtonFrame;
-    _bButton.contents = (id) bButtonImage.CGImage;
-    [_view.layer addSublayer:_bButton];
-    
+    [self showButton:_bButton frame:_swapABXY ? aButtonFrame : bButtonFrame];
+
     // create X Button
-    _xButton.frame = _swapABXY ? yButtonFrame : xButtonFrame;
-    _xButton.contents = (id) xButtonImage.CGImage;
-    [_view.layer addSublayer:_xButton];
-    
+    [self showButton:_xButton frame:_swapABXY ? yButtonFrame : xButtonFrame];
+
     // create Y Button
-    _yButton.frame = _swapABXY ? xButtonFrame : yButtonFrame;
-    _yButton.contents = (id) yButtonImage.CGImage;
-    [_view.layer addSublayer:_yButton];
-    
-    // create Down button
-    UIImage* downButtonImage = [UIImage imageNamed:@"DownButton"];
-    _downButton.frame = CGRectMake(D_PAD_CENTER_X - downButtonImage.size.width / 2, D_PAD_CENTER_Y + D_PAD_DIST, downButtonImage.size.width, downButtonImage.size.height);
-    _downButton.contents = (id) downButtonImage.CGImage;
-    [_view.layer addSublayer:_downButton];
-    
-    // create Right button
-    UIImage* rightButtonImage = [UIImage imageNamed:@"RightButton"];
-    _rightButton.frame = CGRectMake(D_PAD_CENTER_X + D_PAD_DIST, D_PAD_CENTER_Y - rightButtonImage.size.height / 2, rightButtonImage.size.width, rightButtonImage.size.height);
-    _rightButton.contents = (id) rightButtonImage.CGImage;
-    [_view.layer addSublayer:_rightButton];
-    
-    // create Up button
-    UIImage* upButtonImage = [UIImage imageNamed:@"UpButton"];
-    _upButton.frame = CGRectMake(D_PAD_CENTER_X - upButtonImage.size.width / 2, D_PAD_CENTER_Y - D_PAD_DIST - upButtonImage.size.height, upButtonImage.size.width, upButtonImage.size.height);
-    _upButton.contents = (id) upButtonImage.CGImage;
-    [_view.layer addSublayer:_upButton];
-    
-    // create Left button
-    UIImage* leftButtonImage = [UIImage imageNamed:@"LeftButton"];
-    _leftButton.frame = CGRectMake(D_PAD_CENTER_X - D_PAD_DIST - leftButtonImage.size.width, D_PAD_CENTER_Y - leftButtonImage.size.height / 2, leftButtonImage.size.width, leftButtonImage.size.height);
-    _leftButton.contents = (id) leftButtonImage.CGImage;
-    [_view.layer addSublayer:_leftButton];
+    [self showButton:_yButton frame:_swapABXY ? xButtonFrame : yButtonFrame];
+
+    // The arms leave the center of the D-pad neutral
+    CGFloat half = D_PAD_ARM_WIDTH / 2;
+    CGFloat armLength = D_PAD_REACH - half;
+    UIView* dpadContainer = _view;
+    if (_directionGroup != nil) {
+        _directionGroup.frame = _view.bounds;
+        [_view addSubview:_directionGroup];
+        dpadContainer = _directionGroup.contentView;
+    }
+    _dpadVerticalBar.frame = CGRectMake(D_PAD_CENTER_X - half, D_PAD_CENTER_Y - D_PAD_REACH, D_PAD_ARM_WIDTH, D_PAD_REACH * 2);
+    _dpadHorizontalBar.frame = CGRectMake(D_PAD_CENTER_X - D_PAD_REACH, D_PAD_CENTER_Y - half, D_PAD_REACH * 2, D_PAD_ARM_WIDTH);
+    [dpadContainer addSubview:_dpadVerticalBar];
+    [dpadContainer addSubview:_dpadHorizontalBar];
+    [self showButton:_upButton frame:CGRectMake(D_PAD_CENTER_X - half, D_PAD_CENTER_Y - D_PAD_REACH, D_PAD_ARM_WIDTH, armLength)];
+    [self showButton:_downButton frame:CGRectMake(D_PAD_CENTER_X - half, D_PAD_CENTER_Y + half, D_PAD_ARM_WIDTH, armLength)];
+    [self showButton:_leftButton frame:CGRectMake(D_PAD_CENTER_X - D_PAD_REACH, D_PAD_CENTER_Y - half, armLength, D_PAD_ARM_WIDTH)];
+    [self showButton:_rightButton frame:CGRectMake(D_PAD_CENTER_X + half, D_PAD_CENTER_Y - half, armLength, D_PAD_ARM_WIDTH)];
 }
 
 - (void) drawStartSelect {
-    // create Start button
-    UIImage* startButtonImage = [UIImage imageNamed:@"StartButton"];
-    _startButton.frame = CGRectMake(START_X - startButtonImage.size.width / 2, START_Y - startButtonImage.size.height / 2, startButtonImage.size.width, startButtonImage.size.height);
-    _startButton.contents = (id) startButtonImage.CGImage;
-    [_view.layer addSublayer:_startButton];
-    
-    // create Select button
-    UIImage* selectButtonImage = [UIImage imageNamed:@"SelectButton"];
-    _selectButton.frame = CGRectMake(SELECT_X - selectButtonImage.size.width / 2, SELECT_Y - selectButtonImage.size.height / 2, selectButtonImage.size.width, selectButtonImage.size.height);
-    _selectButton.contents = (id) selectButtonImage.CGImage;
-    [_view.layer addSublayer:_selectButton];
+    CGSize systemSize = CGSizeMake(SYSTEM_BUTTON_SIZE, SYSTEM_BUTTON_SIZE);
+    [self showButton:_startButton frame:CenteredRect(START_X, START_Y, systemSize)];
+    [self showButton:_selectButton frame:CenteredRect(SELECT_X, SELECT_Y, systemSize)];
+
+    // The guide button sits centered between View and Menu, as on the controller
+    [self showButton:_guideButton frame:CenteredRect(CGRectGetMidX(_controlArea), (START_Y + SELECT_Y) / 2,
+                                                      CGSizeMake(GUIDE_BUTTON_SIZE, GUIDE_BUTTON_SIZE))];
 }
 
 - (void) drawBumpers {
-    // create L1 button
-    UIImage* l1ButtonImage = [UIImage imageNamed:@"L1"];
-    _l1Button.frame = CGRectMake(L1_X - l1ButtonImage.size.width / 2, L1_Y - l1ButtonImage.size.height / 2, l1ButtonImage.size.width, l1ButtonImage.size.height);
-    _l1Button.contents = (id) l1ButtonImage.CGImage;
-    [_view.layer addSublayer:_l1Button];
-    
-    // create R1 button
-    UIImage* r1ButtonImage = [UIImage imageNamed:@"R1"];
-    _r1Button.frame = CGRectMake(R1_X - r1ButtonImage.size.width / 2, R1_Y - r1ButtonImage.size.height / 2, r1ButtonImage.size.width, r1ButtonImage.size.height);
-    _r1Button.contents = (id) r1ButtonImage.CGImage;
-    [_view.layer addSublayer:_r1Button];
+    [self showButton:_l1Button frame:CenteredRect(L1_X, L1_Y, BUMPER_SIZE)];
+    [self showButton:_r1Button frame:CenteredRect(R1_X, R1_Y, BUMPER_SIZE)];
 }
 
 - (void) drawTriggers {
-    // create L2 button
-    UIImage* l2ButtonImage = [UIImage imageNamed:@"L2"];
-    _l2Button.frame = CGRectMake(L2_X - l2ButtonImage.size.width / 2, L2_Y - l2ButtonImage.size.height / 2, l2ButtonImage.size.width, l2ButtonImage.size.height);
-    _l2Button.contents = (id) l2ButtonImage.CGImage;
-    [_view.layer addSublayer:_l2Button];
-    
-    // create R2 button
-    UIImage* r2ButtonImage = [UIImage imageNamed:@"R2"];
-    _r2Button.frame = CGRectMake(R2_X - r2ButtonImage.size.width / 2, R2_Y - r2ButtonImage.size.height / 2, r2ButtonImage.size.width, r2ButtonImage.size.height);
-    _r2Button.contents = (id) r2ButtonImage.CGImage;
-    [_view.layer addSublayer:_r2Button];
+    [self showButton:_l2Button frame:CenteredRect(L2_X, L2_Y, TRIGGER_SIZE)];
+    [self showButton:_r2Button frame:CenteredRect(R2_X, R2_Y, TRIGGER_SIZE)];
 }
 
 - (void) drawSticks {
-    // create left analog stick
-    UIImage* leftStickBgImage = [UIImage imageNamed:@"StickOuter"];
-    _leftStickBackground.frame = CGRectMake(LS_CENTER_X - leftStickBgImage.size.width / 2, LS_CENTER_Y - leftStickBgImage.size.height / 2, leftStickBgImage.size.width, leftStickBgImage.size.height);
-    _leftStickBackground.contents = (id) leftStickBgImage.CGImage;
-    [_view.layer addSublayer:_leftStickBackground];
-    
-    UIImage* leftStickImage = [UIImage imageNamed:@"StickInner"];
-    _leftStick.frame = CGRectMake(LS_CENTER_X - leftStickImage.size.width / 2, LS_CENTER_Y - leftStickImage.size.height / 2, leftStickImage.size.width, leftStickImage.size.height);
-    _leftStick.contents = (id) leftStickImage.CGImage;
-    [_view.layer addSublayer:_leftStick];
-    
-    // create right analog stick
-    UIImage* rightStickBgImage = [UIImage imageNamed:@"StickOuter"];
-    _rightStickBackground.frame = CGRectMake(RS_CENTER_X - rightStickBgImage.size.width / 2, RS_CENTER_Y - rightStickBgImage.size.height / 2, rightStickBgImage.size.width, rightStickBgImage.size.height);
-    _rightStickBackground.contents = (id) rightStickBgImage.CGImage;
-    [_view.layer addSublayer:_rightStickBackground];
-    
-    UIImage* rightStickImage = [UIImage imageNamed:@"StickInner"];
-    _rightStick.frame = CGRectMake(RS_CENTER_X - rightStickImage.size.width / 2, RS_CENTER_Y - rightStickImage.size.height / 2, rightStickImage.size.width, rightStickImage.size.height);
-    _rightStick.contents = (id) rightStickImage.CGImage;
-    [_view.layer addSublayer:_rightStick];
-    
-    STICK_INNER_SIZE = rightStickImage.size.width;
-    STICK_OUTER_SIZE = rightStickBgImage.size.width;
+    CGSize outerSize = CGSizeMake(STICK_OUTER_SIZE, STICK_OUTER_SIZE);
+    CGSize innerSize = CGSizeMake(STICK_INNER_SIZE, STICK_INNER_SIZE);
+    [self showButton:_leftStickBackground frame:CenteredRect(LS_CENTER_X, LS_CENTER_Y, outerSize)];
+    [self showButton:_leftStick frame:CenteredRect(LS_CENTER_X, LS_CENTER_Y, innerSize)];
+    [self showButton:_rightStickBackground frame:CenteredRect(RS_CENTER_X, RS_CENTER_Y, outerSize)];
+    [self showButton:_rightStick frame:CenteredRect(RS_CENTER_X, RS_CENTER_Y, innerSize)];
 }
 
 - (void) drawL3R3 {
-    UIImage* l3ButtonImage = [UIImage imageNamed:@"L3"];
-    _l3Button.frame = CGRectMake(L3_X - l3ButtonImage.size.width / 2, L3_Y - l3ButtonImage.size.height / 2, l3ButtonImage.size.width, l3ButtonImage.size.height);
-    _l3Button.contents = (id) l3ButtonImage.CGImage;
-    _l3Button.cornerRadius = l3ButtonImage.size.width / 2;
-    _l3Button.borderColor = [UIColor colorWithRed:15.f/255 green:160.f/255 blue:40.f/255 alpha:1.f].CGColor;
-    [_view.layer addSublayer:_l3Button];
-    
-    UIImage* r3ButtonImage = [UIImage imageNamed:@"R3"];
-    _r3Button.frame = CGRectMake(R3_X - r3ButtonImage.size.width / 2, R3_Y - r3ButtonImage.size.height / 2, r3ButtonImage.size.width, r3ButtonImage.size.height);
-    _r3Button.contents = (id) r3ButtonImage.CGImage;
-    _r3Button.cornerRadius = r3ButtonImage.size.width / 2;
-    _r3Button.borderColor = [UIColor colorWithRed:15.f/255 green:160.f/255 blue:40.f/255 alpha:1.f].CGColor;
-    [_view.layer addSublayer:_r3Button];
+    CGSize stickButtonSize = CGSizeMake(STICK_BUTTON_SIZE, STICK_BUTTON_SIZE);
+    [self showButton:_l3Button frame:CenteredRect(L3_X, L3_Y, stickButtonSize)];
+    [self showButton:_r3Button frame:CenteredRect(R3_X, R3_Y, stickButtonSize)];
 }
 
 - (void) hideButtons {
-    [_aButton removeFromSuperlayer];
-    [_bButton removeFromSuperlayer];
-    [_xButton removeFromSuperlayer];
-    [_yButton removeFromSuperlayer];
-    [_upButton removeFromSuperlayer];
-    [_downButton removeFromSuperlayer];
-    [_leftButton removeFromSuperlayer];
-    [_rightButton removeFromSuperlayer];
+    [_directionGroup removeFromSuperview];
+    [_dpadVerticalBar removeFromSuperview];
+    [_dpadHorizontalBar removeFromSuperview];
+    [self hideButton:_aButton];
+    [self hideButton:_bButton];
+    [self hideButton:_xButton];
+    [self hideButton:_yButton];
+    [self hideButton:_upButton];
+    [self hideButton:_downButton];
+    [self hideButton:_leftButton];
+    [self hideButton:_rightButton];
 }
 
 - (void) hideStartSelect {
-    [_startButton removeFromSuperlayer];
-    [_selectButton removeFromSuperlayer];
+    [self hideButton:_startButton];
+    [self hideButton:_selectButton];
+    [self hideButton:_guideButton];
 }
 
 - (void) hideBumpers {
-    [_l1Button removeFromSuperlayer];
-    [_r1Button removeFromSuperlayer];
+    [self hideButton:_l1Button];
+    [self hideButton:_r1Button];
 }
 
 - (void) hideTriggers {
-    [_l2Button removeFromSuperlayer];
-    [_r2Button removeFromSuperlayer];
+    [self hideButton:_l2Button];
+    [self hideButton:_r2Button];
 }
 
 - (void) hideSticks {
-    [_leftStickBackground removeFromSuperlayer];
-    [_rightStickBackground removeFromSuperlayer];
-    [_leftStick removeFromSuperlayer];
-    [_rightStick removeFromSuperlayer];
+    [self hideButton:_leftStickBackground];
+    [self hideButton:_rightStickBackground];
+    [self hideButton:_leftStick];
+    [self hideButton:_rightStick];
 }
 
 - (void) hideL3R3 {
-    [_l3Button removeFromSuperlayer];
-    [_r3Button removeFromSuperlayer];
+    [self hideButton:_l3Button];
+    [self hideButton:_r3Button];
+}
+
+static void ClampToCircle(float* x, float* y, float centerX, float centerY, float radius) {
+    float dx = *x - centerX;
+    float dy = *y - centerY;
+    float distance = hypotf(dx, dy);
+    if (distance > radius) {
+        *x = centerX + dx * radius / distance;
+        *y = centerY + dy * radius / distance;
+    }
 }
 
 - (BOOL) handleTouchMovedEvent:touches {
     BOOL updated = false;
     BOOL buttonTouch = false;
-    float rsMaxX = RS_CENTER_X + STICK_OUTER_SIZE / 2;
-    float rsMaxY = RS_CENTER_Y + STICK_OUTER_SIZE / 2;
-    float rsMinX = RS_CENTER_X - STICK_OUTER_SIZE / 2;
-    float rsMinY = RS_CENTER_Y - STICK_OUTER_SIZE / 2;
-    float lsMaxX = LS_CENTER_X + STICK_OUTER_SIZE / 2;
-    float lsMaxY = LS_CENTER_Y + STICK_OUTER_SIZE / 2;
-    float lsMinX = LS_CENTER_X - STICK_OUTER_SIZE / 2;
-    float lsMinY = LS_CENTER_Y - STICK_OUTER_SIZE / 2;
+    float stickRadius = STICK_OUTER_SIZE / 2;
     
     for (UITouch* touch in touches) {
         CGPoint touchLocation = [touch locationInView:_view];
         float xLoc = touchLocation.x;
         float yLoc = touchLocation.y;
         if (touch == _lsTouch) {
-            if (xLoc > lsMaxX) xLoc = lsMaxX;
-            if (xLoc < lsMinX) xLoc = lsMinX;
-            if (yLoc > lsMaxY) yLoc = lsMaxY;
-            if (yLoc < lsMinY) yLoc = lsMinY;
+            ClampToCircle(&xLoc, &yLoc, LS_CENTER_X, LS_CENTER_Y, STICK_OUTER_SIZE / 2);
             
             _leftStick.frame = CGRectMake(xLoc - STICK_INNER_SIZE / 2, yLoc - STICK_INNER_SIZE / 2, STICK_INNER_SIZE, STICK_INNER_SIZE);
             
-            float xStickVal = (xLoc - LS_CENTER_X) / (lsMaxX - LS_CENTER_X);
-            float yStickVal = (yLoc - LS_CENTER_Y) / (lsMaxY - LS_CENTER_Y);
+            float xStickVal = (xLoc - LS_CENTER_X) / stickRadius;
+            float yStickVal = (yLoc - LS_CENTER_Y) / stickRadius;
             
             if (fabsf(xStickVal) < STICK_DEAD_ZONE) xStickVal = 0;
             if (fabsf(yStickVal) < STICK_DEAD_ZONE) yStickVal = 0;
@@ -624,15 +1159,12 @@ static float L3_Y;
             
             updated = true;
         } else if (touch == _rsTouch) {
-            if (xLoc > rsMaxX) xLoc = rsMaxX;
-            if (xLoc < rsMinX) xLoc = rsMinX;
-            if (yLoc > rsMaxY) yLoc = rsMaxY;
-            if (yLoc < rsMinY) yLoc = rsMinY;
+            ClampToCircle(&xLoc, &yLoc, RS_CENTER_X, RS_CENTER_Y, STICK_OUTER_SIZE / 2);
             
             _rightStick.frame = CGRectMake(xLoc - STICK_INNER_SIZE / 2, yLoc - STICK_INNER_SIZE / 2, STICK_INNER_SIZE, STICK_INNER_SIZE);
             
-            float xStickVal = (xLoc - RS_CENTER_X) / (rsMaxX - RS_CENTER_X);
-            float yStickVal = (yLoc - RS_CENTER_Y) / (rsMaxY - RS_CENTER_Y);
+            float xStickVal = (xLoc - RS_CENTER_X) / stickRadius;
+            float yStickVal = (yLoc - RS_CENTER_Y) / stickRadius;
             
             if (fabsf(xStickVal) < STICK_DEAD_ZONE) xStickVal = 0;
             if (fabsf(yStickVal) < STICK_DEAD_ZONE) yStickVal = 0;
@@ -641,36 +1173,35 @@ static float L3_Y;
             
             updated = true;
         } else if (touch == _dpadTouch) {
-            [_controllerSupport clearButtonFlag:_controller
-                                          flags:UP_FLAG | DOWN_FLAG | LEFT_FLAG | RIGHT_FLAG];
-            
-            // Allow the user to slide their finger to another d-pad button
-            if ([_upButton.presentationLayer hitTest:touchLocation]) {
-                [_controllerSupport setButtonFlag:_controller flags:UP_FLAG];
-                updated = true;
-            } else if ([_downButton.presentationLayer hitTest:touchLocation]) {
-                [_controllerSupport setButtonFlag:_controller flags:DOWN_FLAG];
-                updated = true;
-            } else if ([_leftButton.presentationLayer hitTest:touchLocation]) {
-                [_controllerSupport setButtonFlag:_controller flags:LEFT_FLAG];
-                updated = true;
-            } else if ([_rightButton.presentationLayer hitTest:touchLocation]) {
-                [_controllerSupport setButtonFlag:_controller flags:RIGHT_FLAG];
+            // Follow the finger around the D-pad, including onto the diagonals. Directions keep
+            // following it past the edge so a slide never drops the input.
+            int flags = [self dpadFlagsAt:touchLocation slack:CGFLOAT_MAX];
+            if (flags != _dpadFlags) {
+                [_controllerSupport clearButtonFlag:_controller flags:_dpadFlags & ~flags];
+                [_controllerSupport setButtonFlag:_controller flags:flags & ~_dpadFlags];
+                _dpadFlags = flags;
+                [self highlightDirections:flags];
                 updated = true;
             }
-            
             buttonTouch = true;
-        } else if (touch == _aTouch) {
-            buttonTouch = true;
-        } else if (touch == _bTouch) {
-            buttonTouch = true;
-        } else if (touch == _xTouch) {
-            buttonTouch = true;
-        } else if (touch == _yTouch) {
+        } else if (touch == _aTouch || touch == _bTouch || touch == _xTouch || touch == _yTouch) {
+            // Let the finger roll from one face button onto another
+            int current = touch == _aTouch ? 0 : touch == _bTouch ? 1 : touch == _xTouch ? 2 : 3;
+            int next = [self faceButtonAt:touchLocation slack:SLIDE_SLACK];
+            if (next >= 0 && next != current && *[self faceTouchAtIndex:next] == nil) {
+                [_controllerSupport clearButtonFlag:_controller flags:FACE_FLAGS[current]];
+                *[self faceTouchAtIndex:current] = nil;
+                *[self faceTouchAtIndex:next] = touch;
+                [_controllerSupport setButtonFlag:_controller flags:FACE_FLAGS[next]];
+                [self highlightFaceButtons];
+                updated = true;
+            }
             buttonTouch = true;
         } else if (touch == _startTouch) {
             buttonTouch = true;
         } else if (touch == _selectTouch) {
+            buttonTouch = true;
+        } else if (touch == _guideTouch) {
             buttonTouch = true;
         } else if (touch == _l1Touch) {
             buttonTouch = true;
@@ -704,63 +1235,55 @@ static float L3_Y;
             continue;
         }
         
-        if (_aButton.superlayer != nil && [_aButton.presentationLayer hitTest:touchLocation]) {
-            [_controllerSupport setButtonFlag:_controller flags:A_FLAG];
-            _aTouch = touch;
+        BOOL leftStickHit = [self stickAtCenter:CGPointMake(LS_CENTER_X, LS_CENTER_Y) containsPoint:touchLocation layer:_leftStickBackground];
+        BOOL rightStickHit = [self stickAtCenter:CGPointMake(RS_CENTER_X, RS_CENTER_Y) containsPoint:touchLocation layer:_rightStickBackground];
+        int faceButton = leftStickHit || rightStickHit ? -1 : [self faceButtonAt:touchLocation slack:TOUCH_SLACK];
+        int dpadFlags = _dpadTouch == nil && !leftStickHit && !rightStickHit ? [self dpadFlagsAt:touchLocation slack:TOUCH_SLACK] : -1;
+        if (faceButton >= 0) {
+            if (*[self faceTouchAtIndex:faceButton] == nil) {
+                [_controllerSupport setButtonFlag:_controller flags:FACE_FLAGS[faceButton]];
+                *[self faceTouchAtIndex:faceButton] = touch;
+                [self highlightFaceButtons];
+            }
+            else {
+                [_deadTouches addObject:touch];
+            }
             updated = true;
-        } else if (_bButton.superlayer != nil && [_bButton.presentationLayer hitTest:touchLocation]) {
-            [_controllerSupport setButtonFlag:_controller flags:B_FLAG];
-            _bTouch = touch;
-            updated = true;
-        } else if (_xButton.superlayer != nil && [_xButton.presentationLayer hitTest:touchLocation]) {
-            [_controllerSupport setButtonFlag:_controller flags:X_FLAG];
-            _xTouch = touch;
-            updated = true;
-        } else if (_yButton.superlayer != nil && [_yButton.presentationLayer hitTest:touchLocation]) {
-            [_controllerSupport setButtonFlag:_controller flags:Y_FLAG];
-            _yTouch = touch;
-            updated = true;
-        } else if (_upButton.superlayer != nil && [_upButton.presentationLayer hitTest:touchLocation]) {
-            [_controllerSupport setButtonFlag:_controller flags:UP_FLAG];
+        } else if (dpadFlags >= 0) {
+            [_controllerSupport setButtonFlag:_controller flags:dpadFlags];
             _dpadTouch = touch;
+            _dpadFlags = dpadFlags;
+            [self highlightDirections:dpadFlags];
             updated = true;
-        } else if (_downButton.superlayer != nil && [_downButton.presentationLayer hitTest:touchLocation]) {
-            [_controllerSupport setButtonFlag:_controller flags:DOWN_FLAG];
-            _dpadTouch = touch;
-            updated = true;
-        } else if (_leftButton.superlayer != nil && [_leftButton.presentationLayer hitTest:touchLocation]) {
-            [_controllerSupport setButtonFlag:_controller flags:LEFT_FLAG];
-            _dpadTouch = touch;
-            updated = true;
-        } else if (_rightButton.superlayer != nil && [_rightButton.presentationLayer hitTest:touchLocation]) {
-            [_controllerSupport setButtonFlag:_controller flags:RIGHT_FLAG];
-            _dpadTouch = touch;
-            updated = true;
-        } else if (_startButton.superlayer != nil && [_startButton.presentationLayer hitTest:touchLocation]) {
+        } else if (_startButton.superlayer != nil && [self button:_startButton containsPoint:touchLocation]) {
             [_controllerSupport setButtonFlag:_controller flags:PLAY_FLAG];
             _startTouch = touch;
             updated = true;
-        } else if (_selectButton.superlayer != nil && [_selectButton.presentationLayer hitTest:touchLocation]) {
+        } else if (_selectButton.superlayer != nil && [self button:_selectButton containsPoint:touchLocation]) {
             [_controllerSupport setButtonFlag:_controller flags:BACK_FLAG];
             _selectTouch = touch;
             updated = true;
-        } else if (_l1Button.superlayer != nil && [_l1Button.presentationLayer hitTest:touchLocation]) {
+        } else if (_guideButton.superlayer != nil && [self button:_guideButton containsPoint:touchLocation]) {
+            [_controllerSupport setButtonFlag:_controller flags:SPECIAL_FLAG];
+            _guideTouch = touch;
+            updated = true;
+        } else if (_l1Button.superlayer != nil && [self button:_l1Button containsPoint:touchLocation]) {
             [_controllerSupport setButtonFlag:_controller flags:LB_FLAG];
             _l1Touch = touch;
             updated = true;
-        } else if (_r1Button.superlayer != nil && [_r1Button.presentationLayer hitTest:touchLocation]) {
+        } else if (_r1Button.superlayer != nil && [self button:_r1Button containsPoint:touchLocation]) {
             [_controllerSupport setButtonFlag:_controller flags:RB_FLAG];
             _r1Touch = touch;
             updated = true;
-        } else if (_l2Button.superlayer != nil && [_l2Button.presentationLayer hitTest:touchLocation]) {
+        } else if (_l2Button.superlayer != nil && [self button:_l2Button containsPoint:touchLocation]) {
             [_controllerSupport updateLeftTrigger:_controller left:0xFF];
             _l2Touch = touch;
             updated = true;
-        } else if (_r2Button.superlayer != nil && [_r2Button.presentationLayer hitTest:touchLocation]) {
+        } else if (_r2Button.superlayer != nil && [self button:_r2Button containsPoint:touchLocation]) {
             [_controllerSupport updateRightTrigger:_controller right:0xFF];
             _r2Touch = touch;
             updated = true;
-        } else if (_l3Button.superlayer != nil && [_l3Button.presentationLayer hitTest:touchLocation]) {
+        } else if (_l3Button.superlayer != nil && [self button:_l3Button containsPoint:touchLocation]) {
             if (l3Set) {
                 [_controllerSupport clearButtonFlag:_controller flags:LS_CLK_FLAG];
                 _l3Button.borderWidth = 0.0f;
@@ -771,7 +1294,7 @@ static float L3_Y;
             l3Set = !l3Set;
             _l3Touch = touch;
             updated = true;
-        } else if (_r3Button.superlayer != nil && [_r3Button.presentationLayer hitTest:touchLocation]) {
+        } else if (_r3Button.superlayer != nil && [self button:_r3Button containsPoint:touchLocation]) {
             if (r3Set) {
                 [_controllerSupport clearButtonFlag:_controller flags:RS_CLK_FLAG];
                 _r3Button.borderWidth = 0.0f;
@@ -782,7 +1305,7 @@ static float L3_Y;
             r3Set = !r3Set;
             _r3Touch = touch;
             updated = true;
-        } else if (_leftStick.superlayer != nil && [_leftStick.presentationLayer hitTest:touchLocation]) {
+        } else if (_lsTouch == nil && leftStickHit) {
             if (l3TouchStart != nil) {
                 // Find elapsed time and convert to milliseconds
                 // Use (-) modifier to conversion since receiver is earlier than now
@@ -794,7 +1317,7 @@ static float L3_Y;
             }
             _lsTouch = touch;
             stickTouch = true;
-        } else if (_rightStick.superlayer != nil && [_rightStick.presentationLayer hitTest:touchLocation]) {
+        } else if (_rsTouch == nil && rightStickHit) {
             if (r3TouchStart != nil) {
                 // Find elapsed time and convert to milliseconds
                 // Use (-) modifier to conversion since receiver is earlier than now
@@ -806,6 +1329,9 @@ static float L3_Y;
             }
             _rsTouch = touch;
             stickTouch = true;
+        } else if (leftStickHit || rightStickHit) {
+            [_deadTouches addObject:touch];
+            updated = true;
         }
         if (!updated && !stickTouch && [self isInDeadZone:touch]) {
             [_deadTouches addObject:touch];
@@ -822,26 +1348,21 @@ static float L3_Y;
     BOOL updated = false;
     BOOL touched = false;
     for (UITouch* touch in touches) {
-        if (touch == _aTouch) {
-            [_controllerSupport clearButtonFlag:_controller flags:A_FLAG];
-            _aTouch = nil;
-            updated = true;
-        } else if (touch == _bTouch) {
-            [_controllerSupport clearButtonFlag:_controller flags:B_FLAG];
-            _bTouch = nil;
-            updated = true;
-        } else if (touch == _xTouch) {
-            [_controllerSupport clearButtonFlag:_controller flags:X_FLAG];
-            _xTouch = nil;
-            updated = true;
-        } else if (touch == _yTouch) {
-            [_controllerSupport clearButtonFlag:_controller flags:Y_FLAG];
-            _yTouch = nil;
+        if (touch == _aTouch || touch == _bTouch || touch == _xTouch || touch == _yTouch) {
+            for (int i = 0; i < 4; i++) {
+                if (*[self faceTouchAtIndex:i] == touch) {
+                    [_controllerSupport clearButtonFlag:_controller flags:FACE_FLAGS[i]];
+                    *[self faceTouchAtIndex:i] = nil;
+                }
+            }
+            [self highlightFaceButtons];
             updated = true;
         } else if (touch == _dpadTouch) {
             [_controllerSupport clearButtonFlag:_controller
                                           flags:UP_FLAG | DOWN_FLAG | LEFT_FLAG | RIGHT_FLAG];
             _dpadTouch = nil;
+            _dpadFlags = 0;
+            [self highlightDirections:0];
             updated = true;
         } else if (touch == _startTouch) {
             [_controllerSupport clearButtonFlag:_controller flags:PLAY_FLAG];
@@ -850,6 +1371,10 @@ static float L3_Y;
         } else if (touch == _selectTouch) {
             [_controllerSupport clearButtonFlag:_controller flags:BACK_FLAG];
             _selectTouch = nil;
+            updated = true;
+        } else if (touch == _guideTouch) {
+            [_controllerSupport clearButtonFlag:_controller flags:SPECIAL_FLAG];
+            _guideTouch = nil;
             updated = true;
         } else if (touch == _l1Touch) {
             [_controllerSupport clearButtonFlag:_controller flags:LB_FLAG];
@@ -918,6 +1443,9 @@ static float L3_Y;
         return true;
     }
     else if (_startButton.superlayer != nil && [self isStartSelectDeadZone:touch]) {
+        return true;
+    }
+    else if (_guideButton.superlayer != nil && [self isGuideDeadZone:touch]) {
         return true;
     }
     else if (_l3Button.superlayer != nil && [self isL3R3DeadZone:touch]) {
@@ -996,6 +1524,14 @@ static float L3_Y;
                  startY:_selectButton.frame.origin.y
                    endX:_selectButton.frame.origin.x + _selectButton.frame.size.width
                    endY:_view.frame.origin.y + _view.frame.size.height];
+}
+
+- (BOOL) isGuideDeadZone:(UITouch*) touch {
+    return [self isDeadZone:touch
+                     startX:_guideButton.frame.origin.x
+                     startY:_guideButton.frame.origin.y
+                       endX:_guideButton.frame.origin.x + _guideButton.frame.size.width
+                       endY:_guideButton.frame.origin.y + _guideButton.frame.size.height];
 }
 
 - (BOOL) isStickDeadZone:(UITouch*) touch {

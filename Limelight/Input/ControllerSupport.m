@@ -613,7 +613,7 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
             type = LI_CTYPE_XBOX;
             capabilities = 0;
             supportedButtonFlags =
-                PLAY_FLAG | BACK_FLAG | UP_FLAG | DOWN_FLAG | LEFT_FLAG | RIGHT_FLAG |
+                PLAY_FLAG | BACK_FLAG | SPECIAL_FLAG | UP_FLAG | DOWN_FLAG | LEFT_FLAG | RIGHT_FLAG |
                 LB_FLAG | RB_FLAG | LS_CLK_FLAG | RS_CLK_FLAG | A_FLAG | B_FLAG | X_FLAG | Y_FLAG;
         }
     }

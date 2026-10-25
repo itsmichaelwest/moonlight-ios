@@ -15,9 +15,78 @@
 #import "AbsoluteTouchHandler.h"
 #import "KeyboardInputField.h"
 
+#import <AVFoundation/AVFoundation.h>
+#import <CoreImage/CoreImage.h>
+
 static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
 
+// Space kept clear on each side of the hinge
+static const CGFloat HINGE_CLEARANCE = 16;
+#if !TARGET_OS_TV
+static const CGFloat DECK_CORNER_RADIUS = 22;
+static const int EASED_FADE_STOPS = 16;
+static const int MASK_STOPS = 32;
+// Eased fades of the deck, the reflection, and the cast light where they meet the gap at the hinge
+static const CGFloat DECK_FEATHER = 48;
+static const CGFloat REFLECTION_FEATHER = 56;
+static const CGFloat LIGHT_FEATHER = 32;
+// About 30 cm from the hinge, at roughly 6 points per millimeter
+static const CGFloat EYE_DISTANCE = 1800;
+// For slight folds, the eye's elevation above the lower panel as a fraction of the fold. A real eye
+// would only see a reflection there from a grazing angle.
+static const CGFloat SLIGHT_FOLD_EYE_ELEVATION = .6;
+// Range over which the reflection hands over from the slight-fold view to the physical one
+static const CGFloat EYE_CROSSOVER = 80;
+static const NSTimeInterval REFLECTION_FADE_DURATION = .35;
+// Time constants that smooth out steps in hinge readings and changes in the cast light
+static const CFTimeInterval HINGE_EASING = .05;
+static const CFTimeInterval LIGHT_EASING = .08;
+static const CFTimeInterval LIGHT_SAMPLE_INTERVAL = 1.0 / 30;
+// Light from the upper panel is sampled in vertical bands across the video
+static const int LIGHT_BANDS = 8;
+static const CGFloat REFLECTION_OPACITY = .7;
+static const CGFloat LIGHT_OPACITY = .65;
+// Distance at which the reflection falls to half strength, as a fraction of the reflected video's
+// length, so it reaches farther as the reflection grows
+static const CGFloat REFLECTION_HALF_DISTANCE = .3;
+// Distances at which the cast light, and the backstop that keeps the far end of the deck black,
+// fall to half strength, as fractions of the deck height
+static const CGFloat LIGHT_HALF_DISTANCE = .14;
+static const CGFloat DECK_LIGHT_HALF_DISTANCE = .4;
+static const CGFloat REFLECTION_SAMPLE_WIDTH = 160;
+static const CGFloat REFLECTION_BLUR_SIGMA = 4;
+
+typedef struct {
+    CGFloat colors[LIGHT_BANDS][3];
+} LightSample;
+#endif
+
 @implementation StreamView {
+#if !TARGET_OS_TV
+    CALayer* reflectionClip;
+    CALayer* reflectionImage;
+    UIView* controlDeck;
+    CAGradientLayer* controlDeckGradient;
+    CGSize controlDeckMaskSize;
+    BOOL hasControlDeckTint;
+    BOOL isHingeFolded;
+    BOOL isPreviewingHinge;
+    BOOL isReflecting;
+    BOOL isReflectionFadingOut;
+    CGFloat hingeAngle;
+    CGFloat targetHingeAngle;
+    CGFloat reflectionStrength;
+    CADisplayLink* reflectionLink;
+    CALayer* reflectionLight;
+    CAGradientLayer* reflectionLightGradient;
+    CIContext* reflectionContext;
+    dispatch_queue_t reflectionQueue;
+    BOOL isRenderingReflection;
+    CFTimeInterval lastLightSample;
+    CGFloat lightColors[LIGHT_BANDS][3];
+    CGFloat targetLightColors[LIGHT_BANDS][3];
+#endif
+
     OnScreenControls* onScreenControls;
     
     KeyboardInputField* keyInputField;
@@ -57,10 +126,474 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
     self.videoLayer.bounds = CGRectMake(0, 0, videoRect.size.width, videoRect.size.height);
     self.videoLayer.position = CGPointMake(CGRectGetMidX(videoRect), CGRectGetMidY(videoRect));
 #if !TARGET_OS_TV
+    // Round the video to match the control deck when the panels are separate
+    CGFloat videoCornerRadius = [self usesSeparateControlArea] ? DECK_CORNER_RADIUS : 0;
+    self.videoLayer.cornerRadius = videoCornerRadius;
+    self.videoLayer.cornerCurve = kCACornerCurveContinuous;
+    self.videoLayer.masksToBounds = videoCornerRadius > 0;
+    [self layoutControlDeck];
+    [self layoutReflection];
     [onScreenControls layoutControls];
 #endif
     [CATransaction commit];
 }
+
+#if !TARGET_OS_TV
+static NSArray<NSNumber*>* EasedFadeLocations(void) {
+    NSMutableArray* locations = [[NSMutableArray alloc] init];
+    for (int i = 0; i < EASED_FADE_STOPS; i++) {
+        [locations addObject:@((CGFloat)i / (EASED_FADE_STOPS - 1))];
+    }
+    return locations;
+}
+
+static NSArray* EasedFadeColors(UIColor* color, CGFloat fromAlpha, CGFloat toAlpha) {
+    NSMutableArray* colors = [[NSMutableArray alloc] init];
+    for (NSNumber* location in EasedFadeLocations()) {
+        CGFloat t = location.doubleValue;
+        CGFloat eased = t * t * (3 - 2 * t);
+        [colors addObject:(id)[color colorWithAlphaComponent:fromAlpha + (toAlpha - fromAlpha) * eased].CGColor];
+    }
+    return colors;
+}
+
+// Light reaching a point at the given distance from the hinge, falling off with the square of the
+// distance. It halves at halfDistance and is scaled to reach zero at length.
+static CGFloat LightFalloff(CGFloat distance, CGFloat halfDistance, CGFloat length) {
+    CGFloat atLength = 1 / (1 + pow(length / halfDistance, 2));
+    CGFloat light = 1 / (1 + pow(distance / halfDistance, 2));
+    return MAX(0, (light - atLength) / (1 - atLength));
+}
+
+// A rounded card, eased in over feather from its top edge, then falling off with distance like
+// light when halfDistance is set
+static UIImage* CardMask(CGSize size, CGFloat feather, CGFloat halfDistance) {
+    UIGraphicsImageRendererFormat* format = [UIGraphicsImageRendererFormat preferredFormat];
+    format.scale = 1;
+    UIGraphicsImageRenderer* renderer = [[UIGraphicsImageRenderer alloc] initWithSize:size format:format];
+    return [renderer imageWithActions:^(UIGraphicsImageRendererContext* context) {
+        CGContextRef cg = context.CGContext;
+        [UIColor.blackColor setFill];
+        [[UIBezierPath bezierPathWithRoundedRect:(CGRect){CGPointZero, size} cornerRadius:DECK_CORNER_RADIUS] fill];
+        if (feather <= 0 && halfDistance <= 0) {
+            return;
+        }
+
+        NSMutableArray* colors = [[NSMutableArray alloc] init];
+        CGFloat locations[MASK_STOPS];
+        for (int i = 0; i < MASK_STOPS; i++) {
+            locations[i] = (CGFloat)i / (MASK_STOPS - 1);
+            CGFloat distance = locations[i] * size.height;
+            CGFloat alpha = 1;
+            if (feather > 0 && distance < feather) {
+                CGFloat t = distance / feather;
+                alpha *= t * t * (3 - 2 * t);
+            }
+            if (halfDistance > 0) {
+                alpha *= LightFalloff(distance, halfDistance, size.height);
+            }
+            [colors addObject:(id)[UIColor colorWithWhite:0 alpha:alpha].CGColor];
+        }
+        CGContextSetBlendMode(cg, kCGBlendModeDestinationIn);
+        CGGradientRef gradient = CGGradientCreateWithColors(NULL, (__bridge CFArrayRef)colors, locations);
+        CGContextDrawLinearGradient(cg, gradient, CGPointZero, CGPointMake(0, size.height), 0);
+        CGGradientRelease(gradient);
+    }];
+}
+
+// The reflection comes in quickly at slight folds and levels off as the panels close: a steep
+// ease-out over the fold, from zero when flat (pi radians) to one when closed
+static CGFloat ReflectionStrength(CGFloat hingeAngle) {
+    CGFloat fold = MIN(MAX((M_PI - hingeAngle) / M_PI, 0), 1);
+    return 1 - pow(1 - fold, 10);
+}
+
+// The reflected corners of the video, clockwise from the top left, for an eye at eyeY along and
+// eyeZ above the lower panel. The top of the video reflects farthest from the hinge.
+static void ReflectedCorners(CGPoint corners[4], CGFloat width, CGFloat nearDistance, CGFloat farDistance,
+                             CGFloat fold, CGFloat eyeY, CGFloat eyeZ);
+
+// Where a point on the upper panel appears in the mirror of the lower panel. The point lies on the
+// upper panel at x across and distance from the hinge. Results are x across and y away from the
+// hinge on the lower panel, with the eye at eyeY along and eyeZ above the lower panel.
+static CGPoint ReflectedPoint(CGFloat x, CGFloat distance, CGFloat fold, CGFloat eyeY, CGFloat eyeZ) {
+    CGFloat pointY = -distance * cos(fold);
+    CGFloat pointZ = distance * sin(fold);
+    // The reflection is where the line from the eye to the mirror image of the point meets the panel
+    CGFloat t = eyeZ / (eyeZ + pointZ);
+    return CGPointMake(t * x, eyeY + t * (pointY - eyeY));
+}
+
+static void ReflectedCorners(CGPoint corners[4], CGFloat width, CGFloat nearDistance, CGFloat farDistance,
+                             CGFloat fold, CGFloat eyeY, CGFloat eyeZ) {
+    corners[0] = ReflectedPoint(-width / 2, farDistance, fold, eyeY, eyeZ);
+    corners[1] = ReflectedPoint(width / 2, farDistance, fold, eyeY, eyeZ);
+    corners[2] = ReflectedPoint(width / 2, nearDistance, fold, eyeY, eyeZ);
+    corners[3] = ReflectedPoint(-width / 2, nearDistance, fold, eyeY, eyeZ);
+}
+
+// Maps a layer of the given size, anchored at its origin, onto a quadrilateral given clockwise
+// from the top left corner (Heckbert's square-to-quad projective mapping)
+static CATransform3D QuadTransform(CGSize size, const CGPoint corners[4]) {
+    CGPoint p0 = corners[0], p1 = corners[1], p2 = corners[2], p3 = corners[3];
+    CGFloat dx1 = p1.x - p2.x, dx2 = p3.x - p2.x, dx3 = p0.x - p1.x + p2.x - p3.x;
+    CGFloat dy1 = p1.y - p2.y, dy2 = p3.y - p2.y, dy3 = p0.y - p1.y + p2.y - p3.y;
+    CGFloat denominator = dx1 * dy2 - dx2 * dy1;
+    CGFloat g = (dx3 * dy2 - dx2 * dy3) / denominator;
+    CGFloat h = (dx1 * dy3 - dx3 * dy1) / denominator;
+    CATransform3D transform = CATransform3DIdentity;
+    transform.m11 = (p1.x - p0.x + g * p1.x) / size.width;
+    transform.m12 = (p1.y - p0.y + g * p1.y) / size.width;
+    transform.m14 = g / size.width;
+    transform.m21 = (p3.x - p0.x + h * p3.x) / size.height;
+    transform.m22 = (p3.y - p0.y + h * p3.y) / size.height;
+    transform.m24 = h / size.height;
+    transform.m41 = p0.x;
+    transform.m42 = p0.y;
+    return transform;
+}
+
+- (void)updateReflection {
+    // The display link eases these values, so changes apply directly
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    reflectionImage.opacity = REFLECTION_OPACITY * reflectionStrength;
+    reflectionLightGradient.opacity = LIGHT_OPACITY * reflectionStrength;
+    NSMutableArray* colors = [[NSMutableArray alloc] init];
+    for (int i = 0; i < LIGHT_BANDS; i++) {
+        [colors addObject:(id)[UIColor colorWithRed:lightColors[i][0] green:lightColors[i][1] blue:lightColors[i][2] alpha:1].CGColor];
+    }
+    reflectionLightGradient.colors = colors;
+    [self layoutReflection];
+    [CATransaction commit];
+}
+
+- (void)startReflectionLink {
+    if (reflectionLink != nil) {
+        return;
+    }
+    reflectionLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(stepReflection:)];
+    reflectionLink.preferredFrameRateRange = CAFrameRateRangeMake(30, 120, 120);
+    [reflectionLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+}
+
+- (void)stopReflectionLink {
+    // The display link retains this view until it is invalidated
+    [reflectionLink invalidate];
+    reflectionLink = nil;
+}
+
+- (void)willMoveToWindow:(UIWindow*)newWindow {
+    [super willMoveToWindow:newWindow];
+    if (newWindow == nil) {
+        [self stopReflectionLink];
+    }
+}
+
+- (void)stepReflection:(CADisplayLink*)link {
+    // Ease toward the latest readings so the reflection moves smoothly without lagging behind
+    CFTimeInterval interval = MIN(link.targetTimestamp - link.timestamp, .1);
+    hingeAngle += (targetHingeAngle - hingeAngle) * (1 - exp(-interval / HINGE_EASING));
+    reflectionStrength = ReflectionStrength(hingeAngle);
+    CGFloat lightStep = 1 - exp(-interval / LIGHT_EASING);
+    for (int i = 0; i < LIGHT_BANDS; i++) {
+        for (int c = 0; c < 3; c++) {
+            lightColors[i][c] += (targetLightColors[i][c] - lightColors[i][c]) * lightStep;
+        }
+    }
+    [self renderReflectionWithTimestamp:link.timestamp];
+    [self updateReflection];
+}
+
+// The reflection is a small, blurred copy of the frame on screen, and the cast light follows the
+// colors along the bottom of that frame. A backdrop blur cannot be relied on to blur video, and
+// this needs no second decoder. All of the work, including reading the frame, happens on a
+// background queue, because the video's frames are pulled from the main thread and stalling it
+// would back up the stream.
+- (void)renderReflectionWithTimestamp:(CFTimeInterval)timestamp {
+    if (@available(iOS 17.4, *)) {
+        // The video layer stays hidden until its first frame arrives
+        CALayer* videoLayer = self.videoLayer;
+        if (isRenderingReflection || reflectionImage.hidden || videoLayer.hidden ||
+            ![videoLayer isKindOfClass:AVSampleBufferDisplayLayer.class]) {
+            return;
+        }
+        BOOL sampleLight = timestamp - lastLightSample >= LIGHT_SAMPLE_INTERVAL;
+        if (sampleLight) {
+            lastLightSample = timestamp;
+        }
+        isRenderingReflection = YES;
+        AVSampleBufferVideoRenderer* renderer = ((AVSampleBufferDisplayLayer*)videoLayer).sampleBufferRenderer;
+        __weak StreamView* weakSelf = self;
+        dispatch_async(reflectionQueue, ^{
+            CVPixelBufferRef pixelBuffer = [renderer copyDisplayedPixelBuffer];
+            CGImageRef reflection = NULL;
+            LightSample light = {{{0}}};
+            BOOL hasLight = NO;
+            if (pixelBuffer != NULL) {
+                if (self->reflectionContext == nil) {
+                    self->reflectionContext = [CIContext contextWithOptions:@{kCIContextCacheIntermediates: @NO}];
+                }
+                CIImage* image = [CIImage imageWithCVPixelBuffer:pixelBuffer];
+                reflection = [StreamView createReflectionFromImage:image context:self->reflectionContext];
+                if (sampleLight) {
+                    light = [StreamView lightFromImage:image context:self->reflectionContext];
+                    hasLight = YES;
+                }
+                CVPixelBufferRelease(pixelBuffer);
+            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+                StreamView* strongSelf = weakSelf;
+                if (strongSelf != nil) {
+                    if (reflection != NULL) {
+                        [CATransaction begin];
+                        [CATransaction setDisableActions:YES];
+                        strongSelf->reflectionImage.contents = (__bridge id)reflection;
+                        [CATransaction commit];
+                    }
+                    if (hasLight) {
+                        memcpy(strongSelf->targetLightColors, light.colors, sizeof(light.colors));
+                    }
+                    strongSelf->isRenderingReflection = NO;
+                }
+                CGImageRelease(reflection);
+            });
+        });
+    }
+}
+
++ (CGImageRef)createReflectionFromImage:(CIImage*)image context:(CIContext*)context CF_RETURNS_RETAINED {
+    CIImage* small = [image imageByApplyingFilter:@"CILanczosScaleTransform" withInputParameters:@{
+        kCIInputScaleKey: @(REFLECTION_SAMPLE_WIDTH / image.extent.size.width),
+        kCIInputAspectRatioKey: @1,
+    }];
+    CGRect extent = CGRectIntegral(small.extent);
+    CIImage* blurred = [[[small imageByClampingToExtent] imageByApplyingGaussianBlurWithSigma:REFLECTION_BLUR_SIGMA]
+                        imageByCroppingToRect:extent];
+    return [context createCGImage:blurred fromRect:extent];
+}
+
+// The upper panel lights the deck like a soft area light, colored across the deck by the bottom
+// of the frame, which is nearest it
++ (LightSample)lightFromImage:(CIImage*)image context:(CIContext*)context {
+    // Core Image's origin is the bottom left
+    CGRect band = CGRectMake(CGRectGetMinX(image.extent), CGRectGetMinY(image.extent),
+                             image.extent.size.width, image.extent.size.height * .4);
+    CIImage* columns = [[image imageByCroppingToRect:band] imageByApplyingFilter:@"CIColumnAverage"
+                                                             withInputParameters:@{kCIInputExtentKey: [CIVector vectorWithCGRect:band]}];
+    size_t width = (size_t)band.size.width;
+    NSMutableData* pixels = [NSMutableData dataWithLength:width * 4];
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    [context render:columns toBitmap:pixels.mutableBytes rowBytes:width * 4
+             bounds:CGRectMake(band.origin.x, 0, width, 1) format:kCIFormatRGBA8 colorSpace:colorSpace];
+    CGColorSpaceRelease(colorSpace);
+
+    LightSample sample = {{{0}}};
+    const uint8_t* bytes = pixels.bytes;
+    for (size_t x = 0; x < width; x++) {
+        int bandIndex = (int)(x * LIGHT_BANDS / width);
+        for (int c = 0; c < 3; c++) {
+            sample.colors[bandIndex][c] += bytes[x * 4 + c] / 255.0 / (width / (CGFloat)LIGHT_BANDS);
+        }
+    }
+    return sample;
+}
+
+- (void)layoutReflection {
+    CALayer* reflection = reflectionImage;
+    CGRect videoRect = [self videoAreaRect];
+    // Nothing reflects when the panels are flat or fully closed
+    CGFloat fold = M_PI - hingeAngle;
+    reflection.hidden = !(isReflecting || isReflectionFadingOut) || fold < .01 || fold > M_PI - .01 || CGRectIsEmpty(videoRect);
+    if (reflection.hidden) {
+        return;
+    }
+
+    // Distances from the hinge along the upper panel, with the eye centered on the video
+    CGFloat hinge = CGRectGetMidY(self.bounds);
+    CGFloat nearDistance = hinge - CGRectGetMaxY(videoRect);
+    CGFloat farDistance = hinge - CGRectGetMinY(videoRect);
+    CGFloat width = videoRect.size.width;
+
+    // Slight folds use a raised eye, so a reflection shows as soon as the panels start to close
+    CGFloat elevation = SLIGHT_FOLD_EYE_ELEVATION * fold;
+    CGPoint slight[4];
+    ReflectedCorners(slight, width, nearDistance, farDistance, fold, EYE_DISTANCE * cos(elevation), EYE_DISTANCE * sin(elevation));
+
+    // Deeper folds use a physical eye. Its angle from the lower panel's normal moves from grazing
+    // to midway between the panels' normals by a right angle, so the reflection keeps growing as
+    // the panels close.
+    CGFloat grazing = fold < M_PI_2 ? 1 - fold / M_PI_2 : 0;
+    CGFloat eyeAngle = fold / 2 + (M_PI_2 - fold / 2) * grazing;
+    CGPoint physical[4];
+    ReflectedCorners(physical, width, nearDistance, farDistance, fold, EYE_DISTANCE * sin(eyeAngle), EYE_DISTANCE * cos(eyeAngle));
+
+    // Follow whichever view reflects farther, handing over smoothly where they meet
+    CGFloat handover = MIN(MAX((physical[0].y - slight[0].y) / EYE_CROSSOVER + .5, 0), 1);
+    handover = handover * handover * (3 - 2 * handover);
+    CGPoint corners[4];
+    for (int i = 0; i < 4; i++) {
+        corners[i] = CGPointMake(slight[i].x + (physical[i].x - slight[i].x) * handover,
+                                 slight[i].y + (physical[i].y - slight[i].y) * handover);
+    }
+    CGPoint origin = CGPointMake(CGRectGetMidX(videoRect) - CGRectGetMinX(reflectionClip.frame),
+                                 hinge - CGRectGetMinY(reflectionClip.frame));
+    for (int i = 0; i < 4; i++) {
+        corners[i] = CGPointMake(origin.x + corners[i].x, origin.y + corners[i].y);
+    }
+    reflection.bounds = CGRectMake(0, 0, width, videoRect.size.height);
+    reflection.mask.frame = reflection.bounds;
+    reflection.transform = QuadTransform(videoRect.size, corners);
+}
+
+- (void)setupControlDeck {
+    // The deck sits behind the controls on the lower panel, tinted with the controller color
+    // near the hinge and easing off to black. The untinted glass theme has no deck.
+    OnScreenControlsTheme* theme = [OnScreenControlsTheme savedTheme];
+    hasControlDeckTint = theme.bodyColor != nil;
+    CGFloat saturation = 0;
+    [theme.bodyColor getHue:nil saturation:&saturation brightness:nil alpha:nil];
+    controlDeck = [[UIView alloc] init];
+    controlDeck.userInteractionEnabled = NO;
+    controlDeck.layer.mask = [CALayer layer];
+    controlDeckGradient = [CAGradientLayer layer];
+    // Neutral shells need less tint than colored ones to look equally dim
+    controlDeckGradient.colors = EasedFadeColors(theme.bodyColor ?: UIColor.clearColor, saturation < .1 ? .09 : .16, 0);
+    controlDeckGradient.locations = EasedFadeLocations();
+    [controlDeck.layer addSublayer:controlDeckGradient];
+
+    // The reflection only shows on the deck, fading in from the gap at the hinge. The image is
+    // small and blurred, and scaling it up to the reflected shape softens it further.
+    reflectionQueue = dispatch_queue_create("com.moonlight-stream.reflection", DISPATCH_QUEUE_SERIAL);
+    reflectionClip = [CALayer layer];
+    reflectionClip.mask = [CALayer layer];
+    reflectionClip.opacity = 0;
+    reflectionClip.hidden = YES;
+    reflectionImage = [CALayer layer];
+    reflectionImage.anchorPoint = CGPointZero;
+    reflectionImage.position = CGPointZero;
+    reflectionImage.cornerRadius = DECK_CORNER_RADIUS;
+    reflectionImage.cornerCurve = kCACornerCurveContinuous;
+    reflectionImage.masksToBounds = YES;
+    // Falls off along the reflected video from the edge nearest the hinge
+    CAGradientLayer* reflectionFalloff = [CAGradientLayer layer];
+    NSMutableArray* falloffColors = [[NSMutableArray alloc] init];
+    NSMutableArray* falloffLocations = [[NSMutableArray alloc] init];
+    for (int i = 0; i < MASK_STOPS; i++) {
+        CGFloat location = (CGFloat)i / (MASK_STOPS - 1);
+        [falloffLocations addObject:@(location)];
+        // The top of the video reflects farthest from the hinge
+        CGFloat alpha = LightFalloff(1 - location, REFLECTION_HALF_DISTANCE, 1);
+        [falloffColors addObject:(id)[UIColor colorWithWhite:0 alpha:alpha].CGColor];
+    }
+    reflectionFalloff.colors = falloffColors;
+    reflectionFalloff.locations = falloffLocations;
+    reflectionImage.mask = reflectionFalloff;
+    [reflectionClip addSublayer:reflectionImage];
+
+    reflectionLight = [CALayer layer];
+    reflectionLight.mask = [CALayer layer];
+    reflectionLight.opacity = 0;
+    reflectionLight.hidden = YES;
+    reflectionLightGradient = [CAGradientLayer layer];
+    reflectionLightGradient.startPoint = CGPointMake(0, .5);
+    reflectionLightGradient.endPoint = CGPointMake(1, .5);
+    [reflectionLight addSublayer:reflectionLightGradient];
+
+    [self insertSubview:controlDeck atIndex:0];
+    [self.layer insertSublayer:reflectionClip above:controlDeck.layer];
+    [self.layer insertSublayer:reflectionLight above:reflectionClip];
+}
+
+// Fade the reflection and its light in or out rather than letting them pop
+- (void)fadeReflection {
+    BOOL visible = isReflecting;
+    reflectionClip.hidden = NO;
+    reflectionLight.hidden = NO;
+    if (visible) {
+        [self startReflectionLink];
+    }
+
+    [CATransaction begin];
+    [CATransaction setCompletionBlock:^{
+        // The device may have folded again while this faded out
+        if (!self->isReflecting) {
+            self->isReflectionFadingOut = NO;
+            self->reflectionClip.hidden = YES;
+            self->reflectionLight.hidden = YES;
+            [self stopReflectionLink];
+        }
+    }];
+    for (CALayer* layer in @[reflectionClip, reflectionLight]) {
+        CABasicAnimation* fade = [CABasicAnimation animationWithKeyPath:@"opacity"];
+        fade.fromValue = @(((CALayer*)layer.presentationLayer ?: layer).opacity);
+        fade.toValue = @(visible ? 1 : 0);
+        fade.duration = REFLECTION_FADE_DURATION;
+        fade.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+        [layer addAnimation:fade forKey:@"fade"];
+        layer.opacity = visible ? 1 : 0;
+    }
+    [CATransaction commit];
+}
+
+- (void)layoutControlDeck {
+    BOOL separate = [self usesSeparateControlArea];
+    BOOL reflect = separate && isHingeFolded;
+    if (reflect != isReflecting) {
+        isReflecting = reflect;
+        isReflectionFadingOut = !reflect;
+        // Animate outside of layout, which runs with implicit animations disabled
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self fadeReflection];
+        });
+    }
+    controlDeck.hidden = !separate || !hasControlDeckTint;
+    if (!separate) {
+        return;
+    }
+
+    CGRect deckFrame = [self controlDeckRect];
+    controlDeck.frame = deckFrame;
+    controlDeckGradient.frame = controlDeck.bounds;
+    reflectionClip.frame = deckFrame;
+    reflectionLight.frame = deckFrame;
+    reflectionLightGradient.frame = reflectionLight.bounds;
+
+    if (!CGSizeEqualToSize(controlDeckMaskSize, deckFrame.size) && !CGRectIsEmpty(deckFrame)) {
+        controlDeckMaskSize = deckFrame.size;
+        CGRect bounds = (CGRect){CGPointZero, deckFrame.size};
+        controlDeck.layer.mask.frame = bounds;
+        CGFloat height = deckFrame.size.height;
+        controlDeck.layer.mask.contents = (id)CardMask(deckFrame.size, DECK_FEATHER, 0).CGImage;
+        // The reflection and the cast light fade with distance from the hinge, so the deck stays
+        // black away from it
+        reflectionClip.mask.frame = bounds;
+        reflectionClip.mask.contents = (id)CardMask(deckFrame.size, REFLECTION_FEATHER, height * DECK_LIGHT_HALF_DISTANCE).CGImage;
+        reflectionLight.mask.frame = bounds;
+        reflectionLight.mask.contents = (id)CardMask(deckFrame.size, LIGHT_FEATHER, height * LIGHT_HALF_DISTANCE).CGImage;
+    }
+}
+#endif
+
+#if DEBUG && !TARGET_OS_TV
+- (void)setPreviewHingeAngle:(CGFloat)angle {
+    isPreviewingHinge = YES;
+    hasOpenHinge = YES;
+    isHingeFolded = angle < M_PI - .01;
+    targetHingeAngle = angle;
+    if (reflectionLink == nil) {
+        hingeAngle = angle;
+        reflectionStrength = ReflectionStrength(angle);
+        [self updateReflection];
+    }
+    [self setNeedsLayout];
+}
+
+- (void)setPreviewControlsLevel:(OnScreenControlsLevel)level {
+    [onScreenControls setLevel:level];
+    [self setNeedsLayout];
+}
+#endif
 
 - (void)safeAreaInsetsDidChange {
     [super safeAreaInsetsDidChange];
@@ -75,6 +608,12 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
     
     TemporarySettings* settings = [[[DataManager alloc] init] getSettings];
     
+#if !TARGET_OS_TV
+    hingeAngle = M_PI;
+    targetHingeAngle = M_PI;
+    [self setupControlDeck];
+#endif
+
     keysDown = [[NSMutableSet alloc] init];
     keyInputField = [[KeyboardInputField alloc] initWithFrame:CGRectZero];
     [keyInputField setKeyboardType:UIKeyboardTypeDefault];
@@ -103,10 +642,22 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
             if (strongSelf == nil) {
                 return;
             }
+            if (strongSelf->isPreviewingHinge) {
+                return;
+            }
             BOOL open = update.hinge != nil && (update.hinge.status == UIHingeStatusPartiallyOpen || update.hinge.status == UIHingeStatusFullyOpen);
-            if (strongSelf->hasOpenHinge != open) {
+            BOOL folded = update.hinge != nil && update.hinge.status == UIHingeStatusPartiallyOpen;
+            if (strongSelf->hasOpenHinge != open || strongSelf->isHingeFolded != folded) {
                 strongSelf->hasOpenHinge = open;
+                strongSelf->isHingeFolded = folded;
                 [strongSelf setNeedsLayout];
+            }
+            // While the reflection shows, its display link eases toward the new angle
+            strongSelf->targetHingeAngle = update.hinge != nil ? update.hinge.angle : M_PI;
+            if (strongSelf->reflectionLink == nil) {
+                strongSelf->hingeAngle = strongSelf->targetHingeAngle;
+                strongSelf->reflectionStrength = ReflectionStrength(strongSelf->hingeAngle);
+                [strongSelf updateReflection];
             }
         }]];
     }
@@ -226,7 +777,7 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
     CGRect area = self.bounds;
     if ([self usesSeparateControlArea]) {
         area = UIEdgeInsetsInsetRect(area, self.safeAreaInsets);
-        area.size.height = MAX(0, CGRectGetMidY(self.bounds) - 16 - CGRectGetMinY(area));
+        area.size.height = MAX(0, CGRectGetMidY(self.bounds) - HINGE_CLEARANCE - CGRectGetMinY(area));
     }
     CGSize size;
     if (area.size.width > area.size.height * streamAspectRatio) {
@@ -235,6 +786,13 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
         size = CGSizeMake(area.size.width, area.size.width / streamAspectRatio);
     }
     return CGRectMake(CGRectGetMidX(area) - size.width / 2, CGRectGetMidY(area) - size.height / 2, size.width, size.height);
+}
+
+- (CGRect) controlDeckRect {
+    // The video mirrored across the hinge
+    CGRect videoRect = [self videoAreaRect];
+    return CGRectMake(CGRectGetMinX(videoRect), CGRectGetMidY(self.bounds) * 2 - CGRectGetMaxY(videoRect),
+                      videoRect.size.width, videoRect.size.height);
 }
 
 - (CGSize) getVideoAreaSize {

@@ -30,6 +30,7 @@
 
 #if !TARGET_OS_TV
 #import "SettingsViewController.h"
+#import "ControlsPreviewViewController.h"
 #else
 #import <sys/utsname.h>
 #endif
@@ -936,6 +937,12 @@ static NSMutableSet* hostList;
     [self.view setNeedsLayout];
 }
 
+#if DEBUG && !TARGET_OS_TV
+- (void)showControlsPreview {
+    [ControlsPreviewViewController showInScene:self.view.window.windowScene];
+}
+#endif
+
 - (void)showSettings {
     SettingsViewController* settings = [[SettingsViewController alloc] initWithWindow:self.view.window];
     UINavigationController* navigation = [[UINavigationController alloc] initWithRootViewController:settings];
@@ -1014,6 +1021,14 @@ static NSMutableSet* hostList;
     [_addHostView.heightAnchor constraintEqualToConstant:_addHostView.bounds.size.height].active = YES;
     self.settingsButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"gearshape"] style:UIBarButtonItemStylePlain target:self action:@selector(showSettings)];
     self.settingsButton.accessibilityLabel = @"Settings";
+#if DEBUG && !TARGET_OS_TV
+    // Touch and hold Settings to try the on-screen controls without a host
+    self.settingsButton.menu = [UIMenu menuWithChildren:@[
+        [UIAction actionWithTitle:@"Controls Preview" image:[UIImage systemImageNamed:@"gamecontroller"] identifier:nil handler:^(UIAction* action) {
+            [self showControlsPreview];
+        }],
+    ]];
+#endif
     self.navigationItem.rightBarButtonItem = self.settingsButton;
     self.navigationItem.backButtonTitle = @"Hosts";
     self.navigationItem.backButtonDisplayMode = UINavigationItemBackButtonDisplayModeMinimal;
@@ -1203,6 +1218,13 @@ static NSMutableSet* hostList;
 - (void)viewDidAppear:(BOOL)animated
 {
     [super viewDidAppear:animated];
+#if DEBUG && !TARGET_OS_TV
+    static BOOL openedControlsPreview;
+    if (!openedControlsPreview && [NSUserDefaults.standardUserDefaults boolForKey:@"ControlsPreview"]) {
+        openedControlsPreview = YES;
+        [self showControlsPreview];
+    }
+#endif
 #if !TARGET_OS_TV
     _acceptHostUpdates = YES;
     if (_browserVisible) {

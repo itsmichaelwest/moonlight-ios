@@ -9,6 +9,7 @@
 #import "SettingsViewController.h"
 #import "TemporarySettings.h"
 #import "DataManager.h"
+#import "OnScreenControls.h"
 
 #import <VideoToolbox/VideoToolbox.h>
 #import <AVFoundation/AVFoundation.h>
@@ -106,6 +107,8 @@ CGSize resolutionTable[RESOLUTION_TABLE_SIZE];
     self.touchModeSelector = [self addSegments:@[@"Touchpad", @"Touchscreen"] toStack:stack];
     [self addLabel:@"On-Screen Controls" toStack:stack];
     self.onscreenControlSelector = [self addSegments:@[@"Off", @"Auto", @"Simple", @"Full"] toStack:stack];
+    [self addLabel:@"On-Screen Controls Style" toStack:stack];
+    self.onscreenControlsThemeButton = [self addThemeMenuToStack:stack];
     [self addLabel:@"Optimize Game Settings" toStack:stack];
     self.optimizeSettingsSelector = [self addSegments:@[@"No", @"Yes"] toStack:stack];
     [self addLabel:@"Multi-Controller Mode" toStack:stack];
@@ -143,6 +146,50 @@ CGSize resolutionTable[RESOLUTION_TABLE_SIZE];
     [stack addArrangedSubview:control];
     [stack setCustomSpacing:16 afterView:control];
     return control;
+}
+
+- (UIButton*)addThemeMenuToStack:(UIStackView*)stack {
+    OnScreenControlsTheme* savedTheme = [OnScreenControlsTheme savedTheme];
+    NSMutableArray<UIAction*>* actions = [[NSMutableArray alloc] init];
+    for (OnScreenControlsTheme* theme in [OnScreenControlsTheme themes]) {
+        UIAction* action = [UIAction actionWithTitle:theme.name image:[self swatchForTheme:theme] identifier:theme.identifier handler:^(UIAction* action) {}];
+        action.state = theme == savedTheme ? UIMenuElementStateOn : UIMenuElementStateOff;
+        [actions addObject:action];
+    }
+    UIButtonConfiguration* configuration = [UIButtonConfiguration grayButtonConfiguration];
+    configuration.indicator = UIButtonConfigurationIndicatorPopup;
+    UIButton* button = [UIButton buttonWithConfiguration:configuration primaryAction:nil];
+    button.menu = [UIMenu menuWithChildren:actions];
+    button.showsMenuAsPrimaryAction = YES;
+    button.changesSelectionAsPrimaryAction = YES;
+    button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeading;
+    [stack addArrangedSubview:button];
+    [stack setCustomSpacing:16 afterView:button];
+    return button;
+}
+
+// A shell-colored disc with the face button legends, like a tiny controller face
+- (UIImage*)swatchForTheme:(OnScreenControlsTheme*)theme {
+    CGFloat size = 24;
+    UIGraphicsImageRenderer* renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(size, size)];
+    UIImage* image = [renderer imageWithActions:^(UIGraphicsImageRendererContext* context) {
+        CGRect disc = CGRectMake(.5, .5, size - 1, size - 1);
+        [(theme.bodyColor ?: [UIColor colorWithWhite:1 alpha:.25]) setFill];
+        [UIColor.separatorColor setStroke];
+        UIBezierPath* body = [UIBezierPath bezierPathWithOvalInRect:disc];
+        [body fill];
+        [body stroke];
+        [(theme.capColor ?: [UIColor colorWithWhite:0 alpha:.35]) setFill];
+        [[UIBezierPath bezierPathWithOvalInRect:CGRectInset(disc, 5, 5)] fill];
+        // A, B, X, Y at the bottom, right, left and top
+        CGPoint offsets[] = {{0, 4}, {4, 0}, {-4, 0}, {0, -4}};
+        for (int i = 0; i < 4; i++) {
+            [theme.legendColors[i] setFill];
+            CGPoint center = CGPointMake(size / 2 + offsets[i].x, size / 2 + offsets[i].y);
+            [[UIBezierPath bezierPathWithOvalInRect:CGRectMake(center.x - 1.5, center.y - 1.5, 3, 3)] fill];
+        }
+    }];
+    return [image imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
 }
 
 - (void)viewDidLayoutSubviews {
@@ -318,6 +365,7 @@ BOOL isCustomResolution(CGSize res) {
     [self.framerateSelector addTarget:self action:@selector(updateBitrate) forControlEvents:UIControlEventValueChanged];
     [self.onscreenControlSelector setSelectedSegmentIndex:onscreenControls];
     [self.onscreenControlSelector setEnabled:!currentSettings.absoluteTouchMode];
+    [self.onscreenControlsThemeButton setEnabled:!currentSettings.absoluteTouchMode];
     [self.bitrateSlider setMinimumValue:0];
     [self.bitrateSlider setMaximumValue:(sizeof(bitrateTable) / sizeof(*bitrateTable)) - 1];
     [self.bitrateSlider setValue:[self getSliderValueForBitrate:_bitrate] animated:YES];
@@ -329,6 +377,7 @@ BOOL isCustomResolution(CGSize res) {
 - (void) touchModeChanged {
     // Disable on-screen controls in absolute touch mode
     [self.onscreenControlSelector setEnabled:[self.touchModeSelector selectedSegmentIndex] == 0];
+    [self.onscreenControlsThemeButton setEnabled:[self.touchModeSelector selectedSegmentIndex] == 0];
 }
 
 - (void) updateBitrate {
@@ -615,6 +664,13 @@ BOOL isCustomResolution(CGSize res) {
                       btMouseSupport:btMouseSupport
                    absoluteTouchMode:absoluteTouchMode
                         statsOverlay:statsOverlay];
+    for (OnScreenControlsTheme* theme in [OnScreenControlsTheme themes]) {
+        for (UIAction* action in self.onscreenControlsThemeButton.menu.children) {
+            if (action.state == UIMenuElementStateOn && [action.identifier isEqualToString:theme.identifier]) {
+                [OnScreenControlsTheme saveTheme:theme];
+            }
+        }
+    }
 }
 
 - (void)didReceiveMemoryWarning {

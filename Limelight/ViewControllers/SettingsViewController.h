@@ -17,6 +17,7 @@
 @property (strong, nonatomic) UIView *resolutionDisplayView;
 @property (strong, nonatomic) UISegmentedControl *touchModeSelector;
 @property (strong, nonatomic) UISegmentedControl *onscreenControlSelector;
+@property (strong, nonatomic) UIButton *onscreenControlsThemeButton;
 @property (strong, nonatomic) UISegmentedControl *optimizeSettingsSelector;
 @property (strong, nonatomic) UISegmentedControl *multiControllerSelector;
 @property (strong, nonatomic) UISegmentedControl *swapABXYButtonsSelector;

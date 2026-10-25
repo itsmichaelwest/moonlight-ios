@@ -68,7 +68,8 @@ extern int ff_isom_write_av1c(AVIOContext *pb, const uint8_t *buf, int size,
         [_view.layer replaceSublayer:oldLayer with:displayLayer];
     }
     else {
-        [_view.layer addSublayer:displayLayer];
+        // Keep the video below the on-screen controls
+        [_view.layer insertSublayer:displayLayer atIndex:0];
     }
     
     _view.videoLayer = displayLayer;

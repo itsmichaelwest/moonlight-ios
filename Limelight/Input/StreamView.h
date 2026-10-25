@@ -32,9 +32,17 @@
 - (void) showOnScreenControls;
 - (OnScreenControlsLevel) getCurrentOscState;
 - (BOOL) usesSeparateControlArea;
+// The lower panel card for the controls, sized and placed to mirror the video
+- (CGRect) controlDeckRect;
 
 #if !TARGET_OS_TV
 - (void) updateCursorLocation:(CGPoint)location isMouse:(BOOL)isMouse;
+#endif
+
+#if DEBUG && !TARGET_OS_TV
+// For previewing the controls without a host or a hinge. The angle is in radians, with pi flat.
+- (void) setPreviewHingeAngle:(CGFloat)angle;
+- (void) setPreviewControlsLevel:(OnScreenControlsLevel)level;
 #endif
 
 @end
