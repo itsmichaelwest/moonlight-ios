@@ -24,6 +24,8 @@ static UIColor* ColorFromHex(uint32_t hex) {
 
 static NSString* const OnScreenControlsThemeKey = @"onscreenControlsTheme";
 static NSString* const OnScreenControlsLayoutKey = @"onscreenControlsLayout";
+static NSString* const OnScreenControlsStickCompensationKey = @"onscreenControlsStickCompensation";
+static NSString* const OnScreenControlsRightStickPedalsKey = @"onscreenControlsRightStickPedals";
 
 @implementation OnScreenControlsTheme
 
@@ -214,6 +216,10 @@ static const NSInteger StickCapTag = 2;
     int _dpadFlags;
     UITouch* _lsTouch;
     UITouch* _rsTouch;
+    CGPoint _lsOrigin;
+    CGPoint _rsOrigin;
+    CGFloat _stickCompensation;
+    BOOL _rightStickPedals;
     UITouch* _startTouch;
     UITouch* _selectTouch;
     UITouch* _guideTouch;
@@ -230,12 +236,12 @@ static const NSInteger StickCapTag = 2;
     BOOL l3Set;
     BOOL r3Set;
 
-    BOOL _largeLayout;
     CGRect _separateControlArea;
     CGRect _controlArea;
     UIView* _view;
     OnScreenControlsLevel _level;
     BOOL _visible;
+    CADisplayLink* _touchRateLink;
 
     ControllerSupport *_controllerSupport;
     Controller *_controller;
@@ -243,10 +249,6 @@ static const NSInteger StickCapTag = 2;
     BOOL _swapABXY;
 }
 
-static const float EDGE_WIDTH = .05;
-
-// Control sizes for each layout. The compact sizes suit a phone, and the deck sizes suit the
-// lower panel of a foldable, where the controls sit under the thumbs.
 typedef struct {
     float faceButton;
     // From the center of the face buttons to the inner edge of each button
@@ -260,13 +262,16 @@ typedef struct {
     float stickButton;
     float stickInner;
     float stickOuter;
+    // Extra room around controls for touches that land just outside them, and for fingers
+    // sliding between face buttons or around the D-pad
+    float touchSlack;
+    float slideSlack;
 } ControlSizes;
 
-static const ControlSizes COMPACT_SIZES = {44, 20, 40, 58, {64, 32}, {64, 44}, 36, 44, 56, 48, 88};
-// Laid out for a deck of DECK_REFERENCE_SIZE and scaled to the actual deck
-static const ControlSizes DECK_SIZES = {58, 25, 54, 80, {92, 40}, {92, 50}, 42, 50, 60, 62, 124};
-static const CGSize DECK_REFERENCE_SIZE = {669, 430};
-static ControlSizes gSizes = COMPACT_SIZES;
+// Sizes for a control area of LAYOUT_REFERENCE_SIZE, scaled down to fit smaller areas
+static const ControlSizes CONTROL_SIZES = {58, 25, 54, 80, {92, 40}, {92, 50}, 42, 50, 60, 62, 124, 12, 32};
+static const CGSize LAYOUT_REFERENCE_SIZE = {669, 430};
+static ControlSizes gSizes = CONTROL_SIZES;
 
 #define FACE_BUTTON_SIZE gSizes.faceButton
 #define BUTTON_DIST gSizes.buttonDist
@@ -279,11 +284,8 @@ static ControlSizes gSizes = COMPACT_SIZES;
 #define STICK_BUTTON_SIZE gSizes.stickButton
 #define STICK_INNER_SIZE gSizes.stickInner
 #define STICK_OUTER_SIZE gSizes.stickOuter
-
-// Extra room around controls for touches that land just outside them, and for fingers
-// sliding between face buttons or around the D-pad
-static const float TOUCH_SLACK = 12;
-static const float SLIDE_SLACK = 32;
+#define TOUCH_SLACK gSizes.touchSlack
+#define SLIDE_SLACK gSizes.slideSlack
 
 static float BUTTON_CENTER_X;
 static float BUTTON_CENTER_Y;
@@ -295,7 +297,15 @@ static float D_PAD_CENTER_Y;
 static const float DEAD_ZONE_PADDING = 15;
 
 static const double STICK_CLICK_RATE = 100;
-static const float STICK_DEAD_ZONE = .1;
+// A thumb on glass can't make the fine corrections a sprung stick allows over its short throw, so
+// travel is longer than a real stick's and the output rises slowly near the centre
+static const CGFloat STICK_TRAVEL = 72;
+static const CGFloat STICK_BUFFER = 3;
+static const CGFloat STICK_RESPONSE = 1.5;
+static const NSInteger DEFAULT_STICK_COMPENSATION = 10;
+static const CGFloat PEDAL_THROTTLE_TRAVEL = 64;
+static const CGFloat PEDAL_BRAKE_TRAVEL = 48;
+static const CGFloat PEDAL_BUFFER = 4;
 static float LS_CENTER_X;
 static float LS_CENTER_Y;
 static float RS_CENTER_X;
@@ -329,6 +339,8 @@ static float L3_Y;
     _swapABXY = streamConfig.swapABXYButtons;
     _theme = [OnScreenControlsTheme savedTheme];
     _layout = [OnScreenControls savedLayout];
+    _stickCompensation = [OnScreenControls savedStickCompensation] / 100.0;
+    _rightStickPedals = [OnScreenControls savedRightStickPedals];
     BOOL playStation = _layout == OnScreenControlsLayoutPlayStation;
 
     _controlViews = [NSMapTable strongToStrongObjectsMapTable];
@@ -683,8 +695,8 @@ static const int FACE_FLAGS[] = {A_FLAG, B_FLAG, X_FLAG, Y_FLAG};
     }
 }
 
-static CGFloat DeckScale(CGSize deck) {
-    return MAX(.5, MIN(deck.width / DECK_REFERENCE_SIZE.width, deck.height / DECK_REFERENCE_SIZE.height));
+static CGFloat LayoutScale(CGSize area) {
+    return MAX(.5, MIN(1, MIN(area.width / LAYOUT_REFERENCE_SIZE.width, area.height / LAYOUT_REFERENCE_SIZE.height)));
 }
 
 static ControlSizes ScaledSizes(ControlSizes sizes, CGFloat scale) {
@@ -694,6 +706,7 @@ static ControlSizes ScaledSizes(ControlSizes sizes, CGFloat scale) {
         CGSizeMake(sizes.trigger.width * scale, sizes.trigger.height * scale),
         sizes.systemButton * scale, sizes.guideButton * scale, sizes.stickButton * scale,
         sizes.stickInner * scale, sizes.stickOuter * scale,
+        sizes.touchSlack * scale, sizes.slideSlack * scale,
     };
 }
 
@@ -706,9 +719,28 @@ static ControlSizes ScaledSizes(ControlSizes sizes, CGFloat scale) {
     [[NSUserDefaults standardUserDefaults] setInteger:layout forKey:OnScreenControlsLayoutKey];
 }
 
++ (NSInteger) savedStickCompensation {
+    NSNumber* percent = [[NSUserDefaults standardUserDefaults] objectForKey:OnScreenControlsStickCompensationKey];
+    return percent != nil ? MAX(0, MIN(25, percent.integerValue)) : DEFAULT_STICK_COMPENSATION;
+}
+
++ (void) saveStickCompensation:(NSInteger)percent {
+    [[NSUserDefaults standardUserDefaults] setInteger:percent forKey:OnScreenControlsStickCompensationKey];
+}
+
++ (BOOL) savedRightStickPedals {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:OnScreenControlsRightStickPedalsKey];
+}
+
++ (void) saveRightStickPedals:(BOOL)pedals {
+    [[NSUserDefaults standardUserDefaults] setBool:pedals forKey:OnScreenControlsRightStickPedalsKey];
+}
+
 - (void) layoutControls {
-    CGRect controlArea = UIEdgeInsetsInsetRect(_view.bounds, _view.safeAreaInsets);
-    BOOL largeLayout = MIN(controlArea.size.width, controlArea.size.height) >= 600;
+    // Use equal side insets so controls stay evenly spaced and clear of a cutout on either side
+    UIEdgeInsets insets = _view.safeAreaInsets;
+    insets.left = insets.right = MAX(insets.left, insets.right);
+    CGRect controlArea = UIEdgeInsetsInsetRect(_view.bounds, insets);
     _separateControlArea = CGRectZero;
     if ([(StreamView*)_view usesSeparateControlArea]) {
         // Touches anywhere below the hinge belong to the controls, which sit on the deck that
@@ -721,28 +753,23 @@ static ControlSizes ScaledSizes(ControlSizes sizes, CGFloat scale) {
             controlArea = _separateControlArea;
         }
     }
-    else if (largeLayout) {
-        // Keep controls reachable near the lower edge of a large window.
-        controlArea.origin.y += controlArea.size.height / 2;
-        controlArea.size.height /= 2;
-    }
-    if (CGRectIsEmpty(_separateControlArea) && CGRectGetWidth(_view.bounds) > CGRectGetHeight(_view.bounds)) {
-        CGFloat horizontalInset = MAX(_view.safeAreaInsets.left, _view.safeAreaInsets.right);
-        controlArea.origin.x = CGRectGetMinX(_view.bounds) + horizontalInset;
-        controlArea.size.width = MAX(0, CGRectGetWidth(_view.bounds) - horizontalInset * 2);
-        CGFloat height = MIN(controlArea.size.height, 360);
-        controlArea.origin.y = CGRectGetMaxY(controlArea) - height;
-        controlArea.size.height = height;
-    }
-    if (CGRectIsEmpty(_separateControlArea)) {
-        controlArea = CGRectInset(controlArea, controlArea.size.width * EDGE_WIDTH, 0);
-    }
-    if (CGRectEqualToRect(controlArea, _controlArea) && largeLayout == _largeLayout) {
+    if (CGRectEqualToRect(controlArea, _controlArea)) {
         return;
     }
-    gSizes = CGRectIsEmpty(_separateControlArea) ? COMPACT_SIZES : ScaledSizes(DECK_SIZES, DeckScale(controlArea.size));
+    gSizes = ScaledSizes(CONTROL_SIZES, LayoutScale(controlArea.size));
 
     // Release held controls before moving their hit targets underneath active touches.
+    NSMutableSet* touches = [self heldTouches];
+    [self handleTouchUpEvent:touches];
+    // Consume the rest of these touches rather than turning them into mouse input.
+    [_deadTouches addObjectsFromArray:touches.allObjects];
+    _controlArea = controlArea;
+    if (_visible) {
+        [self updateControls];
+    }
+}
+
+- (NSMutableSet*) heldTouches {
     NSMutableSet* touches = [NSMutableSet setWithArray:_deadTouches];
     UITouch* heldTouches[] = {_aTouch, _bTouch, _xTouch, _yTouch, _dpadTouch, _lsTouch, _rsTouch,
                              _startTouch, _selectTouch, _guideTouch, _r1Touch, _r2Touch, _r3Touch,
@@ -752,14 +779,24 @@ static ControlSizes ScaledSizes(ControlSizes sizes, CGFloat scale) {
             [touches addObject:heldTouches[i]];
         }
     }
-    [self handleTouchUpEvent:touches];
-    // Consume the rest of these touches rather than turning them into mouse input.
-    [_deadTouches addObjectsFromArray:touches.allObjects];
-    _controlArea = controlArea;
-    _largeLayout = largeLayout;
-    if (_visible) {
-        [self updateControls];
+    return touches;
+}
+
+// Touches arrive once per display refresh, and the display otherwise follows the stream's frame
+// rate, so run it at full speed while the controls are held
+- (void) updateTouchRate {
+    if ([self heldTouches].count == 0) {
+        [_touchRateLink invalidate];
+        _touchRateLink = nil;
     }
+    else if (_touchRateLink == nil) {
+        _touchRateLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(touchRateTick:)];
+        _touchRateLink.preferredFrameRateRange = CAFrameRateRangeMake(80, 120, 120);
+        [_touchRateLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+    }
+}
+
+- (void) touchRateTick:(CADisplayLink*)link {
 }
 
 - (void) show {
@@ -797,7 +834,7 @@ static ControlSizes ScaledSizes(ControlSizes sizes, CGFloat scale) {
         case OnScreenControlsLevelAutoGCGamepad:
             // GCGamepad is missing triggers, both analog sticks,
             // and the select button
-            [self setupGamepadControls];
+            [self setupControls];
             
             [self hideButtons];
             [self hideBumpers];
@@ -808,7 +845,7 @@ static ControlSizes ScaledSizes(ControlSizes sizes, CGFloat scale) {
             break;
         case OnScreenControlsLevelAutoGCExtendedGamepad:
             // GCExtendedGamepad is missing R3, L3, and select
-            [self setupExtendedGamepadControls];
+            [self setupControls];
             
             [self hideButtons];
             [self hideBumpers];
@@ -820,7 +857,7 @@ static ControlSizes ScaledSizes(ControlSizes sizes, CGFloat scale) {
         case OnScreenControlsLevelAutoGCExtendedGamepadWithStickButtons:
             // This variant of GCExtendedGamepad has L3 and R3 but
             // is still missing Select
-            [self setupExtendedGamepadControls];
+            [self setupControls];
             
             [self hideButtons];
             [self hideBumpers];
@@ -830,7 +867,7 @@ static ControlSizes ScaledSizes(ControlSizes sizes, CGFloat scale) {
             [self hideSticks];
             break;
         case OnScreenControlsLevelSimple:
-            [self setupSimpleControls];
+            [self setupControls];
             
             [self hideTriggers];
             [self hideL3R3];
@@ -840,7 +877,7 @@ static ControlSizes ScaledSizes(ControlSizes sizes, CGFloat scale) {
             [self drawButtons];
             break;
         case OnScreenControlsLevelFull:
-            [self setupComplexControls];
+            [self setupControls];
             
             [self drawButtons];
             [self drawStartSelect];
@@ -855,194 +892,53 @@ static ControlSizes ScaledSizes(ControlSizes sizes, CGFloat scale) {
     }
 }
 
-// For GCExtendedGamepad controls we move start, select, L3, and R3 to the button
-- (void) setupExtendedGamepadControls {
-    // Start with the default complex layout
-    [self setupComplexControls];
-    if (!CGRectIsEmpty(_separateControlArea)) {
-        // The deck layout already has a place for every control
-        return;
-    }
-    
-    START_X = _controlArea.size.width * .95 + _controlArea.origin.x;
-    START_Y = _controlArea.size.height * .9 + _controlArea.origin.y;
-    SELECT_X = _controlArea.size.width * .05 + _controlArea.origin.x;
-    SELECT_Y = _controlArea.size.height * .9 + _controlArea.origin.y;
-    
-    L3_Y = _controlArea.size.height * .85 + _controlArea.origin.y;
-    R3_Y = _controlArea.size.height * .85 + _controlArea.origin.y;
-    
-    if (_largeLayout) {
-        L3_X = _controlArea.size.width * .15 + _controlArea.origin.x;
-        R3_X = _controlArea.size.width * .85 + _controlArea.origin.x;
-    }
-    else {
-        L3_X = _controlArea.size.width * .25 + _controlArea.origin.x;
-        R3_X = _controlArea.size.width * .75 + _controlArea.origin.x;
-    }
-}
-
-// For GCGamepad controls we move triggers, start, and select
-// to sit right above the analog sticks
-- (void) setupGamepadControls {
-    // Start with the default complex layout
-    [self setupComplexControls];
-    if (!CGRectIsEmpty(_separateControlArea)) {
-        // The deck layout already has a place for every control
-        return;
-    }
-    
-    L2_Y = _controlArea.size.height * .75 + _controlArea.origin.y;
-    L2_X = _controlArea.size.width * .05 + _controlArea.origin.x;
-    
-    R2_Y = _controlArea.size.height * .75 + _controlArea.origin.y;
-    R2_X = _controlArea.size.width * .95 + _controlArea.origin.x;
-    
-    START_X = _controlArea.size.width * .95 + _controlArea.origin.x;
-    START_Y = _controlArea.size.height * .95 + _controlArea.origin.y;
-    SELECT_X = _controlArea.size.width * .05 + _controlArea.origin.x;
-    SELECT_Y = _controlArea.size.height * .95 + _controlArea.origin.y;
-    
-    if (_largeLayout) {
-        // The analog sticks are kept closer to the sides in large windows
-        LS_CENTER_X = _controlArea.size.width * .15 + _controlArea.origin.x;
-        RS_CENTER_X = _controlArea.size.width * .85 + _controlArea.origin.x;
-    }
-}
-
-// For simple controls we move the triggers and buttons to the bottom
-- (void) setupSimpleControls {
-    // Start with the default complex layout
-    [self setupComplexControls];
-    if (!CGRectIsEmpty(_separateControlArea)) {
-        // The deck layout already has a place for every control
-        return;
-    }
-    
-    START_Y = _controlArea.size.height * .9 + _controlArea.origin.y;
-    SELECT_Y = _controlArea.size.height * .9 + _controlArea.origin.y;
-    
-    L2_Y = _controlArea.size.height * .9 + _controlArea.origin.y;
-    L2_X = _controlArea.size.width * .1 + _controlArea.origin.x;
-
-    R2_Y = _controlArea.size.height * .9 + _controlArea.origin.y;
-    R2_X = _controlArea.size.width * .9 + _controlArea.origin.x;
-    
-    if (_largeLayout) {
-        // Lower the D-pad and buttons in large windows
-        D_PAD_CENTER_Y = _controlArea.size.height * .75 + _controlArea.origin.y;
-        BUTTON_CENTER_Y = _controlArea.size.height * .75 + _controlArea.origin.y;
-        
-        // Move Start and Select closer to sides
-        SELECT_X = _controlArea.size.width * .2 + _controlArea.origin.x;
-        START_X = _controlArea.size.width * .8 + _controlArea.origin.x;
-    }
-    else {
-        SELECT_X = _controlArea.size.width * .4 + _controlArea.origin.x;
-        START_X = _controlArea.size.width * .6 + _controlArea.origin.x;
-    }
-}
-
-// The deck under the thumbs follows the controller: the left stick and face buttons where the
-// thumbs rest, with the D-pad and right stick lower and further in, and the shoulder buttons
-// above them. The PlayStation layout swaps the left stick and D-pad. Positions are for a deck
-// of DECK_REFERENCE_SIZE, scaled to the actual deck.
-- (void) setupDeckControls
+// The controls follow the controller: the left stick and face buttons where the thumbs rest, with
+// the D-pad and right stick lower and further in, and the shoulder buttons above them. The
+// PlayStation layout swaps the left stick and D-pad. Each side is placed from its own edge of the
+// control area, so wider areas leave room in the middle.
+- (void) setupControls
 {
-    CGFloat scale = DeckScale(_controlArea.size);
-    CGFloat originX = CGRectGetMidX(_controlArea) - DECK_REFERENCE_SIZE.width * scale / 2;
-    CGFloat originY = CGRectGetMidY(_controlArea) - DECK_REFERENCE_SIZE.height * scale / 2;
-#define DECK_X(x) (originX + (x) * scale)
-#define DECK_Y(y) (originY + (y) * scale)
+    CGFloat scale = LayoutScale(_controlArea.size);
+    CGFloat left = CGRectGetMinX(_controlArea);
+    CGFloat right = CGRectGetMaxX(_controlArea);
+    CGFloat top = CGRectGetMaxY(_controlArea) - LAYOUT_REFERENCE_SIZE.height * scale;
+#define LEFT_X(x) (left + (x) * scale)
+#define RIGHT_X(x) (right - (x) * scale)
+#define LAYOUT_Y(y) (top + (y) * scale)
     BOOL playStation = _layout == OnScreenControlsLayoutPlayStation;
-    LS_CENTER_X = DECK_X(playStation ? 240 : 112);
-    LS_CENTER_Y = DECK_Y(playStation ? 345 : 232);
-    BUTTON_CENTER_X = DECK_X(557);
-    BUTTON_CENTER_Y = DECK_Y(232);
-    D_PAD_CENTER_X = DECK_X(playStation ? 112 : 240);
-    D_PAD_CENTER_Y = DECK_Y(playStation ? 232 : 345);
-    RS_CENTER_X = DECK_X(429);
-    RS_CENTER_Y = DECK_Y(345);
+    LS_CENTER_X = LEFT_X(playStation ? 240 : 112);
+    LS_CENTER_Y = LAYOUT_Y(playStation ? 345 : 232);
+    D_PAD_CENTER_X = LEFT_X(playStation ? 112 : 240);
+    D_PAD_CENTER_Y = LAYOUT_Y(playStation ? 232 : 345);
+    BUTTON_CENTER_X = RIGHT_X(112);
+    BUTTON_CENTER_Y = LAYOUT_Y(232);
+    RS_CENTER_X = RIGHT_X(240);
+    RS_CENTER_Y = LAYOUT_Y(345);
 
-    L2_X = DECK_X(96);
-    L2_Y = DECK_Y(48);
-    L1_X = DECK_X(96);
-    L1_Y = DECK_Y(108);
-    R2_X = DECK_X(573);
-    R2_Y = DECK_Y(48);
-    R1_X = DECK_X(573);
-    R1_Y = DECK_Y(108);
+    L2_X = LEFT_X(96);
+    L2_Y = LAYOUT_Y(48);
+    L1_X = LEFT_X(96);
+    L1_Y = LAYOUT_Y(108);
+    R2_X = RIGHT_X(96);
+    R2_Y = LAYOUT_Y(48);
+    R1_X = RIGHT_X(96);
+    R1_Y = LAYOUT_Y(108);
 
-    // The system buttons sit in a row between the shoulder buttons
-    SELECT_X = DECK_X(270);
-    SELECT_Y = DECK_Y(60);
-    START_X = DECK_X(399);
-    START_Y = DECK_Y(60);
+    // The system buttons sit along the bottom between the lower controls when they fit,
+    // otherwise between the shoulder buttons
+    BOOL bottomRow = right - left - 640 * scale >= 203 * scale;
+    SELECT_X = CGRectGetMidX(_controlArea) - 64.5 * scale;
+    START_X = CGRectGetMidX(_controlArea) + 64.5 * scale;
+    SELECT_Y = START_Y = LAYOUT_Y(bottomRow ? 395 : 60);
 
     // Stick clicks replace the sticks when a controller provides them
     L3_X = LS_CENTER_X;
     L3_Y = LS_CENTER_Y;
     R3_X = RS_CENTER_X;
     R3_Y = RS_CENTER_Y;
-#undef DECK_X
-#undef DECK_Y
-}
-
-- (void) setupComplexControls
-{
-    if (!CGRectIsEmpty(_separateControlArea)) {
-        [self setupDeckControls];
-        return;
-    }
-
-    D_PAD_CENTER_X = _controlArea.size.width * .1 + _controlArea.origin.x;
-    D_PAD_CENTER_Y = _controlArea.size.height * .60 + _controlArea.origin.y;
-    BUTTON_CENTER_X = _controlArea.size.width * .9 + _controlArea.origin.x;
-    BUTTON_CENTER_Y = _controlArea.size.height * .60 + _controlArea.origin.y;
-    
-    if (_largeLayout)
-    {
-        // The analog sticks are kept closer to the sides in large windows
-        LS_CENTER_X = _controlArea.size.width * .22 + _controlArea.origin.x;
-        LS_CENTER_Y = _controlArea.size.height * .80 + _controlArea.origin.y;
-        RS_CENTER_X = _controlArea.size.width * .77 + _controlArea.origin.x;
-        RS_CENTER_Y = _controlArea.size.height * .80 + _controlArea.origin.y;
-    }
-    else
-    {
-        LS_CENTER_X = _controlArea.size.width * .35 + _controlArea.origin.x;
-        LS_CENTER_Y = _controlArea.size.height * .75 + _controlArea.origin.y;
-        RS_CENTER_X = _controlArea.size.width * .65 + _controlArea.origin.x;
-        RS_CENTER_Y = _controlArea.size.height * .75 + _controlArea.origin.y;
-    }
-    
-    START_X = _controlArea.size.width * .9 + _controlArea.origin.x;
-    START_Y = _controlArea.size.height * .9 + _controlArea.origin.y;
-    SELECT_X = _controlArea.size.width * .1 + _controlArea.origin.x;
-    SELECT_Y = _controlArea.size.height * .9 + _controlArea.origin.y;
-    
-    L1_Y = _controlArea.size.height * .27 + _controlArea.origin.y;
-    L2_Y = _controlArea.size.height * .1 + _controlArea.origin.y;
-    R1_Y = _controlArea.size.height * .27 + _controlArea.origin.y;
-    R2_Y = _controlArea.size.height * .1 + _controlArea.origin.y;
-    
-    if (_largeLayout) {
-        // Move L/R buttons closer to the side in large windows
-        L1_X = _controlArea.size.width * .05 + _controlArea.origin.x;
-        L2_X = _controlArea.size.width * .05 + _controlArea.origin.x;
-        R1_X = _controlArea.size.width * .95 + _controlArea.origin.x;
-        R2_X = _controlArea.size.width * .95 + _controlArea.origin.x;
-    }
-    else {
-        L1_X = _controlArea.size.width * .1 + _controlArea.origin.x;
-        L2_X = _controlArea.size.width * .1 + _controlArea.origin.x;
-        R1_X = _controlArea.size.width * .9 + _controlArea.origin.x;
-        R2_X = _controlArea.size.width * .9 + _controlArea.origin.x;
-    }
-
-    // Keep the D-pad and face buttons inside narrow control areas
-    D_PAD_CENTER_X = MAX(D_PAD_CENTER_X, CGRectGetMinX(_controlArea) + D_PAD_REACH);
-    BUTTON_CENTER_X = MIN(BUTTON_CENTER_X, CGRectGetMaxX(_controlArea) - BUTTON_DIST - FACE_BUTTON_SIZE);
+#undef LEFT_X
+#undef RIGHT_X
+#undef LAYOUT_Y
 }
 
 static CGRect CenteredRect(CGFloat x, CGFloat y, CGSize size) {
@@ -1165,51 +1061,69 @@ static CGRect CenteredRect(CGFloat x, CGFloat y, CGSize size) {
     [self hideButton:_r3Button];
 }
 
-static void ClampToCircle(float* x, float* y, float centerX, float centerY, float radius) {
-    float dx = *x - centerX;
-    float dy = *y - centerY;
-    float distance = hypotf(dx, dy);
-    if (distance > radius) {
-        *x = centerX + dx * radius / distance;
-        *y = centerY + dy * radius / distance;
+// Deflection is measured from where the touch started so grabbing the stick never jumps it.
+// Past a small buffer the output starts at the compensation level, so the first movement already
+// clears the dead zone the game applies, then curves up to full deflection.
+- (CGPoint) moveStick:(CALayer*)stick center:(CGPoint)center origin:(CGPoint)origin location:(CGPoint)location
+{
+    CGFloat scale = LayoutScale(_controlArea.size);
+    CGFloat travel = STICK_TRAVEL * scale;
+    CGFloat buffer = STICK_BUFFER * scale;
+    CGFloat dx = location.x - origin.x;
+    CGFloat dy = location.y - origin.y;
+    CGFloat distance = hypot(dx, dy);
+    if (distance > travel) {
+        dx *= travel / distance;
+        dy *= travel / distance;
+        distance = travel;
+    }
+    CGFloat capScale = MIN(1, STICK_OUTER_SIZE / 2 / travel);
+    stick.frame = CGRectMake(center.x + dx * capScale - STICK_INNER_SIZE / 2, center.y + dy * capScale - STICK_INNER_SIZE / 2, STICK_INNER_SIZE, STICK_INNER_SIZE);
+    if (distance <= buffer) {
+        return CGPointZero;
+    }
+    CGFloat output = _stickCompensation + (1 - _stickCompensation) * pow((distance - buffer) / (travel - buffer), STICK_RESPONSE);
+    return CGPointMake(dx / distance * output, dy / distance * output);
+}
+
+// Sliding up from where the touch started presses the throttle (RT) and sliding down the brake (LT),
+// so the right thumb can brake while the left one steers
+- (void) movePedals:(CGPoint)location
+{
+    CGFloat scale = LayoutScale(_controlArea.size);
+    CGFloat throttleTravel = PEDAL_THROTTLE_TRAVEL * scale;
+    CGFloat brakeTravel = PEDAL_BRAKE_TRAVEL * scale;
+    CGFloat buffer = PEDAL_BUFFER * scale;
+    CGFloat dy = MAX(-throttleTravel, MIN(brakeTravel, location.y - _rsOrigin.y));
+    CGFloat capOffset = (dy < 0 ? dy / throttleTravel : dy / brakeTravel) * STICK_OUTER_SIZE / 2;
+    _rightStick.frame = CGRectMake(RS_CENTER_X - STICK_INNER_SIZE / 2, RS_CENTER_Y + capOffset - STICK_INNER_SIZE / 2, STICK_INNER_SIZE, STICK_INNER_SIZE);
+    if (_r2Touch == nil) {
+        [_controllerSupport updateRightTrigger:_controller right:0xFF * MAX(0, (-dy - buffer) / (throttleTravel - buffer))];
+    }
+    if (_l2Touch == nil) {
+        [_controllerSupport updateLeftTrigger:_controller left:0xFF * MAX(0, (dy - buffer) / (brakeTravel - buffer))];
     }
 }
 
 - (BOOL) handleTouchMovedEvent:touches {
     BOOL updated = false;
     BOOL buttonTouch = false;
-    float stickRadius = STICK_OUTER_SIZE / 2;
     
     for (UITouch* touch in touches) {
         CGPoint touchLocation = [touch locationInView:_view];
-        float xLoc = touchLocation.x;
-        float yLoc = touchLocation.y;
         if (touch == _lsTouch) {
-            ClampToCircle(&xLoc, &yLoc, LS_CENTER_X, LS_CENTER_Y, STICK_OUTER_SIZE / 2);
-            
-            _leftStick.frame = CGRectMake(xLoc - STICK_INNER_SIZE / 2, yLoc - STICK_INNER_SIZE / 2, STICK_INNER_SIZE, STICK_INNER_SIZE);
-            
-            float xStickVal = (xLoc - LS_CENTER_X) / stickRadius;
-            float yStickVal = (yLoc - LS_CENTER_Y) / stickRadius;
-            
-            if (fabsf(xStickVal) < STICK_DEAD_ZONE) xStickVal = 0;
-            if (fabsf(yStickVal) < STICK_DEAD_ZONE) yStickVal = 0;
-            
-            [_controllerSupport updateLeftStick:_controller x:0x7FFE * xStickVal y:0x7FFE * -yStickVal];
+            CGPoint value = [self moveStick:_leftStick center:CGPointMake(LS_CENTER_X, LS_CENTER_Y) origin:_lsOrigin location:touchLocation];
+            [_controllerSupport updateLeftStick:_controller x:0x7FFE * value.x y:0x7FFE * -value.y];
             
             updated = true;
         } else if (touch == _rsTouch) {
-            ClampToCircle(&xLoc, &yLoc, RS_CENTER_X, RS_CENTER_Y, STICK_OUTER_SIZE / 2);
-            
-            _rightStick.frame = CGRectMake(xLoc - STICK_INNER_SIZE / 2, yLoc - STICK_INNER_SIZE / 2, STICK_INNER_SIZE, STICK_INNER_SIZE);
-            
-            float xStickVal = (xLoc - RS_CENTER_X) / stickRadius;
-            float yStickVal = (yLoc - RS_CENTER_Y) / stickRadius;
-            
-            if (fabsf(xStickVal) < STICK_DEAD_ZONE) xStickVal = 0;
-            if (fabsf(yStickVal) < STICK_DEAD_ZONE) yStickVal = 0;
-            
-            [_controllerSupport updateRightStick:_controller x:0x7FFE * xStickVal y:0x7FFE * -yStickVal];
+            if (_rightStickPedals) {
+                [self movePedals:touchLocation];
+            }
+            else {
+                CGPoint value = [self moveStick:_rightStick center:CGPointMake(RS_CENTER_X, RS_CENTER_Y) origin:_rsOrigin location:touchLocation];
+                [_controllerSupport updateRightStick:_controller x:0x7FFE * value.x y:0x7FFE * -value.y];
+            }
             
             updated = true;
         } else if (touch == _dpadTouch) {
@@ -1356,9 +1270,10 @@ static void ClampToCircle(float* x, float* y, float centerX, float centerY, floa
                 }
             }
             _lsTouch = touch;
+            _lsOrigin = touchLocation;
             stickTouch = true;
         } else if (_rsTouch == nil && rightStickHit) {
-            if (r3TouchStart != nil) {
+            if (r3TouchStart != nil && !_rightStickPedals) {
                 // Find elapsed time and convert to milliseconds
                 // Use (-) modifier to conversion since receiver is earlier than now
                 double r3TouchTime = [r3TouchStart timeIntervalSinceNow] * -1000.0;
@@ -1368,6 +1283,7 @@ static void ClampToCircle(float* x, float* y, float centerX, float centerY, floa
                 }
             }
             _rsTouch = touch;
+            _rsOrigin = touchLocation;
             stickTouch = true;
         } else if (leftStickHit || rightStickHit) {
             [_deadTouches addObject:touch];
@@ -1381,12 +1297,14 @@ static void ClampToCircle(float* x, float* y, float centerX, float centerY, floa
     if (updated) {
         [_controllerSupport updateFinished:_controller];
     }
+    [self updateTouchRate];
     return updated || stickTouch;
 }
 
 - (BOOL)handleTouchUpEvent:touches {
     BOOL updated = false;
     BOOL touched = false;
+    BOOL releasedTrigger = false;
     for (UITouch* touch in touches) {
         if (touch == _aTouch || touch == _bTouch || touch == _xTouch || touch == _yTouch) {
             for (int i = 0; i < 4; i++) {
@@ -1427,10 +1345,12 @@ static void ClampToCircle(float* x, float* y, float centerX, float centerY, floa
         } else if (touch == _l2Touch) {
             [_controllerSupport updateLeftTrigger:_controller left:0];
             _l2Touch = nil;
+            releasedTrigger = true;
             updated = true;
         } else if (touch == _r2Touch) {
             [_controllerSupport updateRightTrigger:_controller right:0];
             _r2Touch = nil;
+            releasedTrigger = true;
             updated = true;
         } else if (touch == _lsTouch) {
             _leftStick.frame = CGRectMake(LS_CENTER_X - STICK_INNER_SIZE / 2, LS_CENTER_Y - STICK_INNER_SIZE / 2, STICK_INNER_SIZE, STICK_INNER_SIZE);
@@ -1443,6 +1363,14 @@ static void ClampToCircle(float* x, float* y, float centerX, float centerY, floa
             _rightStick.frame = CGRectMake(RS_CENTER_X - STICK_INNER_SIZE / 2, RS_CENTER_Y - STICK_INNER_SIZE / 2, STICK_INNER_SIZE, STICK_INNER_SIZE);
             [_controllerSupport updateRightStick:_controller x:0 y:0];
             [_controllerSupport clearButtonFlag:_controller flags:RS_CLK_FLAG];
+            if (_rightStickPedals) {
+                if (_r2Touch == nil) {
+                    [_controllerSupport updateRightTrigger:_controller right:0];
+                }
+                if (_l2Touch == nil) {
+                    [_controllerSupport updateLeftTrigger:_controller left:0];
+                }
+            }
             r3TouchStart = [NSDate date];
             _rsTouch = nil;
             updated = true;
@@ -1460,10 +1388,14 @@ static void ClampToCircle(float* x, float* y, float centerX, float centerY, floa
             updated = true;
         }
     }
+    if (releasedTrigger && _rightStickPedals && _rsTouch != nil) {
+        [self movePedals:[_rsTouch locationInView:_view]];
+    }
     if (updated) {
         [_controllerSupport updateFinished:_controller];
     }
     
+    [self updateTouchRate];
     return updated || touched;
 }
 

@@ -18,6 +18,8 @@
 @property (strong, nonatomic) UISegmentedControl *touchModeSelector;
 @property (strong, nonatomic) UISegmentedControl *onscreenControlSelector;
 @property (strong, nonatomic) UISegmentedControl *onscreenControlsLayoutSelector;
+@property (strong, nonatomic) UISegmentedControl *stickCompensationSelector;
+@property (strong, nonatomic) UISegmentedControl *rightStickSelector;
 @property (strong, nonatomic) UIButton *onscreenControlsThemeButton;
 @property (strong, nonatomic) UISegmentedControl *optimizeSettingsSelector;
 @property (strong, nonatomic) UISegmentedControl *multiControllerSelector;

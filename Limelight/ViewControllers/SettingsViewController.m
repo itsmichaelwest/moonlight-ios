@@ -109,6 +109,10 @@ CGSize resolutionTable[RESOLUTION_TABLE_SIZE];
     self.onscreenControlSelector = [self addSegments:@[@"Off", @"Auto", @"Simple", @"Full"] toStack:stack];
     [self addLabel:@"On-Screen Controls Layout" toStack:stack];
     self.onscreenControlsLayoutSelector = [self addSegments:@[@"Xbox", @"PlayStation"] toStack:stack];
+    [self addLabel:@"Stick Dead Zone Compensation" toStack:stack];
+    self.stickCompensationSelector = [self addSegments:@[@"Off", @"10%", @"20%"] toStack:stack];
+    [self addLabel:@"Right Stick" toStack:stack];
+    self.rightStickSelector = [self addSegments:@[@"Stick", @"Throttle & Brake"] toStack:stack];
     [self addLabel:@"On-Screen Controls Style" toStack:stack];
     self.onscreenControlsThemeButton = [self addThemeMenuToStack:stack];
     [self addLabel:@"Optimize Game Settings" toStack:stack];
@@ -369,6 +373,10 @@ BOOL isCustomResolution(CGSize res) {
     [self.onscreenControlSelector setEnabled:!currentSettings.absoluteTouchMode];
     [self.onscreenControlsLayoutSelector setSelectedSegmentIndex:[OnScreenControls savedLayout]];
     [self.onscreenControlsLayoutSelector setEnabled:!currentSettings.absoluteTouchMode];
+    [self.stickCompensationSelector setSelectedSegmentIndex:MIN([OnScreenControls savedStickCompensation] / 10, 2)];
+    [self.stickCompensationSelector setEnabled:!currentSettings.absoluteTouchMode];
+    [self.rightStickSelector setSelectedSegmentIndex:[OnScreenControls savedRightStickPedals] ? 1 : 0];
+    [self.rightStickSelector setEnabled:!currentSettings.absoluteTouchMode];
     [self.onscreenControlsThemeButton setEnabled:!currentSettings.absoluteTouchMode];
     [self.bitrateSlider setMinimumValue:0];
     [self.bitrateSlider setMaximumValue:(sizeof(bitrateTable) / sizeof(*bitrateTable)) - 1];
@@ -382,6 +390,8 @@ BOOL isCustomResolution(CGSize res) {
     // Disable on-screen controls in absolute touch mode
     [self.onscreenControlSelector setEnabled:[self.touchModeSelector selectedSegmentIndex] == 0];
     [self.onscreenControlsLayoutSelector setEnabled:[self.touchModeSelector selectedSegmentIndex] == 0];
+    [self.stickCompensationSelector setEnabled:[self.touchModeSelector selectedSegmentIndex] == 0];
+    [self.rightStickSelector setEnabled:[self.touchModeSelector selectedSegmentIndex] == 0];
     [self.onscreenControlsThemeButton setEnabled:[self.touchModeSelector selectedSegmentIndex] == 0];
 }
 
@@ -670,6 +680,8 @@ BOOL isCustomResolution(CGSize res) {
                    absoluteTouchMode:absoluteTouchMode
                         statsOverlay:statsOverlay];
     [OnScreenControls saveLayout:[self.onscreenControlsLayoutSelector selectedSegmentIndex]];
+    [OnScreenControls saveStickCompensation:[self.stickCompensationSelector selectedSegmentIndex] * 10];
+    [OnScreenControls saveRightStickPedals:[self.rightStickSelector selectedSegmentIndex] == 1];
     for (OnScreenControlsTheme* theme in [OnScreenControlsTheme themes]) {
         for (UIAction* action in self.onscreenControlsThemeButton.menu.children) {
             if (action.state == UIMenuElementStateOn && [action.identifier isEqualToString:theme.identifier]) {

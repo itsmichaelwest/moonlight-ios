@@ -55,6 +55,12 @@ typedef NS_ENUM(NSInteger, OnScreenControlsLayout) {
 
 + (OnScreenControlsLayout) savedLayout;
 + (void) saveLayout:(OnScreenControlsLayout)layout;
+// Minimum stick output as a percentage, to clear the dead zone the game applies
++ (NSInteger) savedStickCompensation;
++ (void) saveStickCompensation:(NSInteger)percent;
+// Whether the right stick drives the triggers as throttle and brake pedals
++ (BOOL) savedRightStickPedals;
++ (void) saveRightStickPedals:(BOOL)pedals;
 
 - (id) initWithView:(UIView*)view controllerSup:(ControllerSupport*)controllerSupport streamConfig:(StreamConfiguration*)streamConfig;
 - (BOOL) handleTouchDownEvent:(NSSet*)touches;

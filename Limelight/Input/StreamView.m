@@ -642,7 +642,9 @@ static CATransform3D QuadTransform(CGSize size, const CGPoint corners[4]) {
             if (strongSelf == nil) {
                 return;
             }
-            if (strongSelf->isPreviewingHinge) {
+            // An unknown status is transient while the device opens or closes, and acting on it
+            // would flip the layout and drop held controls
+            if (strongSelf->isPreviewingHinge || (update.hinge != nil && update.hinge.status == UIHingeStatusUnknown)) {
                 return;
             }
             BOOL open = update.hinge != nil && (update.hinge.status == UIHingeStatusPartiallyOpen || update.hinge.status == UIHingeStatusFullyOpen);
